@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-x-evals"
+version = "0.1.0"
+description = "Sentinel-X 评测框架 — benchmark runner 与报告"
+requires-python = ">=3.13"
+dependencies = ["pydantic>=2"]

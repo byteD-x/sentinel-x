@@ -1,0 +1,49 @@
+---
+# 默认拒绝所有入站流量
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: demo-shop
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 允许 sentinel-system 访问 demo-shop（诊断查询）
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-sentinel-diagnostics
+  namespace: demo-shop
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: sentinel-x
+          podSelector:
+            matchLabels:
+              role: diagnostics
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# sentinel-chaos 只能影响 demo-shop
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-chaos-to-demo
+  namespace: demo-shop
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: sentinel-chaos

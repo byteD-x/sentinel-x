@@ -1,0 +1,17 @@
+name: "payment-pod-crash@1"
+version: 1
+description: "payment-api Pod 因 OOM 崩溃，Kubernetes 自动重启恢复"
+category: kubernetes
+faults:
+  - fault_type: out_of_memory
+    target_service: payment-api
+    parameters: {}
+    duration_seconds: 120
+    cleanup_command: "POST /fault/clear"
+ground_truth: "payment-api Pod 因内存不足被 OOMKilled，Deployment 自动创建新 Pod"
+expected_root_cause_category: kubernetes
+recovery_assertions:
+  - "payment-api Pod Running"
+  - "payment-api 5xx 错误率 < 1%"
+allowlisted_runbooks:
+  - "no_op"  # Kubernetes 自动恢复，无需手动动作

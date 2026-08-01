@@ -1,0 +1,173 @@
+"""
+Action Gateway 测试 — 覆盖完整校验链和安全边界。
+"""
+
+import hashlib
+import json
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from sentinel_x_action_gateway.app import app, store, gate
+
+
+@pytest.fixture(autouse=True)
+def reset_state():
+    """每个测试前重置状态。"""
+    store._executions.clear()
+    store._idempotency_keys.clear()
+    gate.kill_switch = False
+
+
+@pytest.fixture
+async def client():
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        yield ac
+
+
+def _make_plan_hash(runbook_ref: str, target: str, parameters: dict, incident_id: str) -> str:
+    canonical = json.dumps({
+        "runbook_ref": runbook_ref,
+        "target": target,
+        "parameters": parameters,
+        "incident_id": incident_id,
+    }, sort_keys=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _make_request(
+    runbook_ref: str = "restart_deployment@1",
+    target: str = "payment-api",
+    parameters: dict | None = None,
+    incident_id: str = "incident-test-001",
+) -> dict:
+    if parameters is None:
+        parameters = {"reason": "测试"}
+    plan_hash = _make_plan_hash(runbook_ref, target, parameters, incident_id)
+    return {
+        "runbook_ref": runbook_ref,
+        "target": target,
+        "parameters": parameters,
+        "idempotency_key": f"test-key-{hashlib.sha256(str(hash(str(parameters))).encode()).hexdigest()[:12]}",
+        "plan_hash": plan_hash,
+        "approval_id": "approval-test-001",
+        "approval_token": "test-token",
+        "incident_id": incident_id,
+        "audience": "sentinel-action-gateway",
+    }
+
+
+@pytest.mark.asyncio
+class TestHappyPath:
+    """正常流程。"""
+
+    async def test_restart_deployment_succeeds(self, client):
+        resp = await client.post("/api/actions", json=_make_request())
+        assert resp.status_code == 202
+
+    async def test_scale_deployment_succeeds(self, client):
+        resp = await client.post("/api/actions", json=_make_request(
+            runbook_ref="scale_deployment@1",
+            target="inventory-api",
+            parameters={"replicas": 5, "reason": "扩容测试"},
+        ))
+        assert resp.status_code == 202
+
+    async def test_get_status_after_submit(self, client):
+        resp = await client.post("/api/actions", json=_make_request())
+        execution_id = resp.json()["execution_id"]
+        resp2 = await client.get(f"/api/actions/{execution_id}")
+        assert resp2.status_code == 200
+        assert resp2.json()["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+class TestRejections:
+    """拒绝场景。"""
+
+    async def test_unknown_runbook_rejected(self, client):
+        resp = await client.post("/api/actions", json=_make_request(
+            runbook_ref="unknown_action@1"
+        ))
+        assert resp.status_code == 400
+        assert "未知 Runbook" in resp.json()["detail"]
+
+    async def test_r2_runbook_rejected(self, client):
+        """R2 操作被拒绝（尽管未在 MVP 登记，仍应被拒绝）。"""
+        # 未登记的 runbook 被当作未知处理
+        resp = await client.post("/api/actions", json=_make_request(
+            runbook_ref="db_rollback@1"
+        ))
+        assert resp.status_code == 400
+
+    async def test_invalid_target_rejected(self, client):
+        resp = await client.post("/api/actions", json=_make_request(
+            target="unauthorized-service"
+        ))
+        assert resp.status_code == 400
+        assert "白名单" in resp.json()["detail"]
+
+    async def test_wrong_plan_hash_rejected(self, client):
+        data = _make_request()
+        data["plan_hash"] = "0000000000000000"  # 错误的 hash
+        resp = await client.post("/api/actions", json=data)
+        assert resp.status_code == 400
+        assert "hash" in resp.json()["detail"].lower()
+
+    async def test_duplicate_idempotency_key_rejected(self, client):
+        data = _make_request()
+        # 第一次
+        resp1 = await client.post("/api/actions", json=data)
+        assert resp1.status_code == 202
+        # 第二次相同 key
+        resp2 = await client.post("/api/actions", json=data)
+        assert resp2.status_code == 400
+        assert "幂等键" in resp2.json()["detail"]
+
+    async def test_invalid_scale_params_rejected(self, client):
+        resp = await client.post("/api/actions", json=_make_request(
+            runbook_ref="scale_deployment@1",
+            target="order-api",
+            parameters={"replicas": 100},  # 超出最大值 10
+        ))
+        assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+class TestKillSwitch:
+    """Kill Switch 测试。"""
+
+    async def test_kill_switch_blocks_actions(self, client):
+        # 激活 Kill Switch
+        await client.post("/api/admin/kill-switch?activate=true")
+        resp = await client.post("/api/actions", json=_make_request())
+        assert resp.status_code == 400
+        assert "Kill Switch" in resp.json()["detail"]
+
+    async def test_kill_switch_deactivate_restores(self, client):
+        # 激活再关闭
+        await client.post("/api/admin/kill-switch?activate=true")
+        await client.post("/api/admin/kill-switch?activate=false")
+        resp = await client.post("/api/actions", json=_make_request())
+        assert resp.status_code == 202
+
+
+@pytest.mark.asyncio
+class TestRunbooks:
+    """Runbook 列表。"""
+
+    async def test_list_runbooks(self, client):
+        resp = await client.get("/api/runbooks")
+        assert resp.status_code == 200
+        assert len(resp.json()["items"]) == 2  # restart + scale
+
+
+@pytest.mark.asyncio
+class TestHealth:
+    """健康检查。"""
+
+    async def test_health(self, client):
+        resp = await client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["actions_enabled"] is True

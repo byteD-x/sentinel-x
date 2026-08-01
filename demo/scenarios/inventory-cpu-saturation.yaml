@@ -1,0 +1,18 @@
+name: "inventory-cpu-saturation@1"
+version: 1
+description: "inventory-api CPU 使用率持续 >95%，需要扩容"
+category: resource
+faults:
+  - fault_type: latency
+    target_service: inventory-api
+    parameters:
+      latency_ms: 5000
+    duration_seconds: 300
+    cleanup_command: "POST /fault/clear"
+ground_truth: "inventory-api 流量突增导致 CPU 饱和，现有副本数不足以处理负载"
+expected_root_cause_category: resource
+recovery_assertions:
+  - "inventory-api CPU 使用率 < 80%"
+  - "inventory-api 副本数 >= 4"
+allowlisted_runbooks:
+  - "scale_deployment@1"

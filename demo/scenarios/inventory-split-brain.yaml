@@ -1,0 +1,17 @@
+name: "inventory-split-brain@1"
+version: 1
+description: "Redis 主从切换后出现 split-brain，库存数据不一致"
+category: application
+faults:
+  - fault_type: error_5xx
+    target_service: inventory-api
+    parameters:
+      error_rate: 0.7
+    duration_seconds: 300
+    cleanup_command: "POST /fault/clear"
+ground_truth: "Redis 主从切换执行不当，旧主继续接受写入，导致 split-brain"
+expected_root_cause_category: application
+recovery_assertions:
+  - "inventory-api 库存同步延迟 < 10s"
+allowlisted_runbooks:
+  - "restart_deployment@1"

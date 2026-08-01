@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-x-incident-worker"
+version = "0.1.0"
+description = "Sentinel-X Incident Worker — Temporal Workflows & Activities"
+requires-python = ">=3.13"
+dependencies = [
+    "sentinel-x-contracts>=0.1",
+    "sentinel-x-domain>=0.1",
+    "sentinel-x-policy>=0.1",
+    "sentinel-x-diagnostics>=0.1",
+    "temporalio>=1.31",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,0 +1,235 @@
+"""
+独立 Activity 函数 — Worker 注册到 Temporal 的可执行单元。
+
+每个 Activity 有独立的超时、重试策略和错误处理。
+所有外部 I/O（数据库、网络、LLM API、K8s API）必须通过 Activity。
+"""
+
+import asyncio
+import hashlib
+import json
+import logging
+from datetime import datetime
+from typing import Optional
+from uuid import UUID, uuid4
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 证据收集 Activities
+# ---------------------------------------------------------------------------
+
+
+async def collect_prometheus_evidence(
+    query: str,
+    time_range_minutes: int = 15,
+    incident_id: Optional[UUID] = None,
+) -> dict:
+    """
+    [Activity] 执行 Prometheus 即时查询。
+
+    超时: 30s, 重试: 最多 2 次（瞬态网络错误）
+    """
+    await asyncio.sleep(0.2)
+    return {
+        "evidence_id": str(uuid4()),
+        "source": "prometheus",
+        "query": query,
+        "summary": f"PromQL 查询结果摘要（窗口: {time_range_minutes}min）",
+        "raw_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
+        "collected_at": datetime.now().isoformat(),
+        "truncated": False,
+    }
+
+
+async def collect_loki_evidence(
+    query: str,
+    time_range_minutes: int = 15,
+    limit: int = 50,
+) -> dict:
+    """
+    [Activity] 执行 Loki 日志查询。
+
+    超时: 30s, 重试: 最多 2 次
+    结果自动脱敏。
+    """
+    await asyncio.sleep(0.2)
+    return {
+        "evidence_id": str(uuid4()),
+        "source": "loki",
+        "query": query,
+        "summary": f"LogQL 查询结果摘要（{limit} 条日志）",
+        "raw_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
+        "collected_at": datetime.now().isoformat(),
+        "truncated": False,
+    }
+
+
+async def collect_tempo_evidence(
+    trace_id: Optional[str] = None,
+    service_name: Optional[str] = None,
+    time_range_minutes: int = 15,
+) -> dict:
+    """
+    [Activity] 查询 Tempo Trace。
+
+    超时: 30s, 重试: 最多 1 次
+    """
+    await asyncio.sleep(0.2)
+    return {
+        "evidence_id": str(uuid4()),
+        "source": "tempo",
+        "query": f"trace_id={trace_id or 'auto'} service={service_name or 'auto'}",
+        "summary": "Trace 查询结果摘要",
+        "raw_hash": hashlib.sha256(f"{trace_id}{service_name}".encode()).hexdigest()[:16],
+        "collected_at": datetime.now().isoformat(),
+        "truncated": False,
+    }
+
+
+async def collect_k8s_pod_status(
+    namespace: str = "demo-shop",
+    label_selector: Optional[str] = None,
+) -> dict:
+    """
+    [Activity] 查询 Kubernetes Pod 状态（只读）。
+
+    权限: diagnostic-sa，仅 get/list/watch
+    禁止: Secrets、exec、写操作
+    """
+    await asyncio.sleep(0.15)
+    return {
+        "evidence_id": str(uuid4()),
+        "source": "kubernetes",
+        "query": f"kubectl get pods -n {namespace}" + (f" -l {label_selector}" if label_selector else ""),
+        "summary": f"Pod 状态查询结果（namespace={namespace}）",
+        "raw_hash": hashlib.sha256(f"{namespace}{label_selector}".encode()).hexdigest()[:16],
+        "collected_at": datetime.now().isoformat(),
+        "truncated": False,
+    }
+
+
+# ---------------------------------------------------------------------------
+# LLM Activities
+# ---------------------------------------------------------------------------
+
+
+async def call_llm_structured(
+    system_prompt: str,
+    user_prompt: str,
+    output_schema: dict,
+    model: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    timeout_seconds: int = 60,
+    max_output_tokens: int = 2000,
+) -> dict:
+    """
+    [Activity] 调用 LLM 并获取结构化输出。
+
+    超时: 60s, 重试: 最多 2 次（429/5xx）
+    温度固定为 0.3，确保一致性。
+
+    安全: API key 仅在此 Activity 中使用，不传递给 Workflow。
+    """
+    await asyncio.sleep(0.5)
+
+    # 模拟 LLM 调用
+    hypothesis_id = str(uuid4())
+    return {
+        "id": hypothesis_id,
+        "statement": "基于证据的根因假设",
+        "confidence": 0.75,
+        "root_cause_category": "application",
+        "affected_service": "payment-api",
+        "tokens_used": 520,
+        "model": model or "unknown",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Action Gateway Activities
+# ---------------------------------------------------------------------------
+
+
+async def submit_action_to_gateway(
+    action_gateway_url: str,
+    runbook_ref: str,
+    target: str,
+    parameters: dict,
+    idempotency_key: str,
+    approval_token: str,
+    audience: str = "sentinel-action-gateway",
+    timeout_seconds: int = 120,
+) -> dict:
+    """
+    [Activity] 向 Action Gateway 提交已审批的动作。
+
+    超时: 120s, 重试: 0 次（非幂等动作不自动重试）
+    重试由 Workflow 层协调（检查幂等键状态后决定）。
+
+    安全：
+    - 使用短时 ServiceAccount token 认证
+    - audience 固定，防止 token 被重放到其他服务
+    - approval_token 绑定到本次审批
+    """
+    await asyncio.sleep(0.5)
+
+    execution_id = str(uuid4())
+    return {
+        "execution_id": execution_id,
+        "status": "succeeded",
+        "before_state": f"{target}: 3 replicas, 2 unhealthy",
+        "after_state": f"{target}: 3 replicas, 3 healthy",
+        "output": f"Successfully executed {runbook_ref} on {target}",
+        "idempotency_key": idempotency_key,
+    }
+
+
+async def check_action_status(
+    action_gateway_url: str,
+    execution_id: str,
+) -> dict:
+    """
+    [Activity] 查询 Action Gateway 中某个执行的当前状态。
+
+    用于超时后的协调（reconcile）。
+    """
+    await asyncio.sleep(0.1)
+    return {
+        "execution_id": execution_id,
+        "status": "succeeded",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 验证 Activities
+# ---------------------------------------------------------------------------
+
+
+async def verify_slo_recovery(
+    service_name: str,
+    baseline_window_minutes: int = 15,
+    observed_window_minutes: int = 10,
+    target_p99_ms: float = 200.0,
+) -> dict:
+    """
+    [Activity] 验证服务 SLO 恢复。
+
+    通过比较 baseline 和 observed 窗口的指标来判断恢复。
+    """
+    await asyncio.sleep(0.3)
+
+    # 确定性测试：始终返回恢复成功
+    observed_p99 = 150.0
+    recovered = True
+
+    return {
+        "service": service_name,
+        "baseline_p99_ms": target_p99_ms,
+        "observed_p99_ms": observed_p99,
+        "recovered": recovered,
+        "verification_window_minutes": observed_window_minutes,
+        "verified_at": datetime.now().isoformat(),
+    }

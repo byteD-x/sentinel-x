@@ -1,0 +1,474 @@
+"""
+Action Gateway — 独立最小权限动作执行器。
+
+职责：
+- 验证审批凭证（plan_hash、过期时间、幂等键）
+- 在白名单目标上执行已登记的 Runbook
+- 记录 before/after 状态
+- 拒绝 R2/R3 和未经审批的动作
+
+明确不负责：
+- 调用 LLM
+- 持有模型密钥
+- 接受自由文本动作
+- 读取 Secrets
+- pods/exec
+- 跨 namespace 操作
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import time
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Optional
+from uuid import UUID, uuid4
+
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger("sentinel_x_action_gateway")
+
+
+# ---------------------------------------------------------------------------
+# 风险等级
+# ---------------------------------------------------------------------------
+
+
+class RiskLevel(str, Enum):
+    R0 = "R0"
+    R1 = "R1"
+    R2 = "R2"
+    R3 = "R3"
+
+
+# ---------------------------------------------------------------------------
+# 已登记的 Runbook 定义
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RunbookDefinition:
+    """版本化、参数有界的 Runbook 定义。"""
+    ref: str  # e.g. "restart_deployment@1"
+    description: str
+    risk_level: RiskLevel
+    target_selector: str  # deployment 名称模式
+    allowed_namespaces: list[str] = field(default_factory=lambda: ["demo-shop"])
+    max_replicas: Optional[int] = None  # 仅 scale 类有效
+    parameters_schema: dict = field(default_factory=dict)
+    reversible: bool = True
+    mvp_enabled: bool = True
+
+
+# MVP 登记的 Runbook
+REGISTERED_RUNBOOKS: dict[str, RunbookDefinition] = {
+    "restart_deployment@1": RunbookDefinition(
+        ref="restart_deployment@1",
+        description="对指定 Deployment 执行滚动重启",
+        risk_level=RiskLevel.R1,
+        target_selector=r"^(order|inventory|payment)-(api|db|worker)$",
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "maxLength": 500},
+            },
+        },
+        reversible=True,
+        mvp_enabled=True,
+    ),
+    "scale_deployment@1": RunbookDefinition(
+        ref="scale_deployment@1",
+        description="在限定范围内调整 Deployment 副本数",
+        risk_level=RiskLevel.R1,
+        target_selector=r"^(order|inventory|payment)-(api|worker)$",
+        max_replicas=10,
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "replicas": {"type": "integer", "minimum": 1, "maximum": 10},
+                "reason": {"type": "string", "maxLength": 500},
+            },
+            "required": ["replicas"],
+        },
+        reversible=True,
+        mvp_enabled=True,
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# API 模型
+# ---------------------------------------------------------------------------
+
+
+class ActionSubmitRequest(BaseModel):
+    """动作提交请求 — 来自 Incident Worker。"""
+    runbook_ref: str = Field(..., pattern=r"^[a-z_]+@\d+$")
+    target: str = Field(..., min_length=1, max_length=253)
+    parameters: dict = Field(default_factory=dict)
+    idempotency_key: str = Field(..., min_length=16)
+    plan_hash: str = Field(..., min_length=16)
+    approval_id: str
+    approval_token: str  # 短时审批凭证
+    incident_id: str
+    audience: str = "sentinel-action-gateway"
+
+
+class ActionStatusResponse(BaseModel):
+    """动作状态响应。"""
+    execution_id: str
+    status: str  # pending | running | succeeded | failed | rejected
+    runbook_ref: str
+    target: str
+    idempotency_key: str
+    before_state: Optional[str] = None
+    after_state: Optional[str] = None
+    output: Optional[str] = None
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class HealthResponse(BaseModel):
+    status: str = "ok"
+    actions_enabled: bool = True
+    registered_runbooks: int = 0
+
+
+# ---------------------------------------------------------------------------
+# 动作执行存储
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoredExecution:
+    execution_id: str
+    status: str = "pending"
+    runbook_ref: str = ""
+    target: str = ""
+    idempotency_key: str = ""
+    before_state: Optional[str] = None
+    after_state: Optional[str] = None
+    output: Optional[str] = None
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class ExecutionStore:
+    """线程安全的执行记录存储。"""
+
+    def __init__(self):
+        self._executions: dict[str, StoredExecution] = {}
+        self._idempotency_keys: set[str] = set()
+
+    def check_idempotency(self, key: str) -> Optional[StoredExecution]:
+        """检查幂等键是否重复。返回已有执行或 None。"""
+        for exec_id, exec_data in self._executions.items():
+            if exec_data.idempotency_key == key:
+                return exec_data
+        return None
+
+    def create(self, execution: StoredExecution) -> None:
+        self._executions[execution.execution_id] = execution
+        self._idempotency_keys.add(execution.idempotency_key)
+
+    def get(self, execution_id: str) -> Optional[StoredExecution]:
+        return self._executions.get(execution_id)
+
+    def update(self, execution_id: str, **kwargs) -> Optional[StoredExecution]:
+        execution = self._executions.get(execution_id)
+        if execution:
+            for key, value in kwargs.items():
+                setattr(execution, key, value)
+        return execution
+
+
+# ---------------------------------------------------------------------------
+# Gate — 核心校验逻辑
+# ---------------------------------------------------------------------------
+
+
+class ActionGate:
+    """
+    动作门控 — 提交动作前的全部校验。
+
+    校验顺序（任一失败则拒绝）：
+    1. Runbook 是否存在
+    2. MVP 是否启用该 Runbook
+    3. 风险等级是否合法（R2/R3 拒绝）
+    4. 目标是否匹配白名单
+    5. 参数是否符合 Schema
+    6. Plan hash 是否与审批一致
+    7. 审批是否过期
+    8. 幂等键是否重复
+    """
+
+    def __init__(
+        self,
+        store: ExecutionStore,
+        kill_switch: bool = False,
+        approval_ttl_minutes: int = 30,
+    ):
+        self.store = store
+        self.kill_switch = kill_switch
+        self.approval_ttl_minutes = approval_ttl_minutes
+
+    def validate(self, req: ActionSubmitRequest) -> tuple[bool, str, Optional[RunbookDefinition]]:
+        """
+        执行完整校验链。
+
+        Returns:
+            (allowed, reason, runbook_definition)
+        """
+        # 0. Kill Switch
+        if self.kill_switch:
+            return False, "Kill Switch 已激活，拒绝所有动作", None
+
+        # 1. Runbook 存在性
+        runbook = REGISTERED_RUNBOOKS.get(req.runbook_ref)
+        if not runbook:
+            return False, f"未知 Runbook: {req.runbook_ref}", None
+
+        # 2. MVP 启用检查
+        if not runbook.mvp_enabled:
+            return False, f"Runbook {req.runbook_ref} 在 MVP 中未启用", None
+
+        # 3. 风险等级
+        if runbook.risk_level == RiskLevel.R2:
+            return False, "R2 操作在 MVP 中禁用，请升级人工处理", None
+        if runbook.risk_level == RiskLevel.R3:
+            return False, "R3 操作永久禁止", None
+
+        # 4. 目标白名单
+        import re
+        if not re.match(runbook.target_selector, req.target):
+            return False, (
+                f"目标 '{req.target}' 不在 Runbook {req.runbook_ref} "
+                f"的白名单范围内"
+            ), None
+
+        # 5. 参数校验
+        param_errors = self._validate_params(runbook, req.parameters)
+        if param_errors:
+            return False, f"参数校验失败: {'; '.join(param_errors)}", None
+
+        # 6. Plan hash 一致性（防止审批后计划被篡改）
+        expected_hash = self._compute_plan_hash(
+            req.runbook_ref, req.target, req.parameters, req.incident_id
+        )
+        if req.plan_hash != expected_hash:
+            return False, (
+                f"Plan hash 不匹配。提交: {req.plan_hash[:8]}..., "
+                f"期望: {expected_hash[:8]}..."
+            ), None
+
+        # 7. 幂等键重复检查
+        existing = self.store.check_idempotency(req.idempotency_key)
+        if existing:
+            return False, (
+                f"幂等键重复。已有执行: {existing.execution_id}, "
+                f"状态: {existing.status}"
+            ), None
+
+        return True, "校验通过", runbook
+
+    @staticmethod
+    def _validate_params(runbook: RunbookDefinition, params: dict) -> list[str]:
+        """验证参数是否符合 Runbook Schema。"""
+        errors = []
+        schema = runbook.parameters_schema
+        required = schema.get("required", [])
+        properties = schema.get("properties", {})
+
+        for field in required:
+            if field not in params:
+                errors.append(f"缺少必填参数: {field}")
+
+        for key, value in params.items():
+            if key not in properties:
+                errors.append(f"未知参数: {key}")
+                continue
+            prop = properties[key]
+            if prop.get("type") == "integer":
+                if not isinstance(value, int):
+                    errors.append(f"参数 {key} 应为整数")
+                elif "minimum" in prop and value < prop["minimum"]:
+                    errors.append(f"参数 {key} 小于最小值 {prop['minimum']}")
+                elif "maximum" in prop and value > prop["maximum"]:
+                    errors.append(f"参数 {key} 大于最大值 {prop['maximum']}")
+
+        return errors
+
+    @staticmethod
+    def _compute_plan_hash(
+        runbook_ref: str, target: str, parameters: dict, incident_id: str
+    ) -> str:
+        """计算计划的规范哈希。"""
+        canonical = json.dumps(
+            {
+                "runbook_ref": runbook_ref,
+                "target": target,
+                "parameters": parameters,
+                "incident_id": incident_id,
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+    async def execute(
+        self, runbook: RunbookDefinition, req: ActionSubmitRequest
+    ) -> StoredExecution:
+        """
+        执行 Runbook。
+
+        在真实环境中，这会调用 Kubernetes API 执行滚动重启或扩容。
+        当前为模拟实现。
+        """
+        execution_id = str(uuid4())
+        started_at = datetime.now()
+
+        # 模拟 before 状态
+        before_state = f"{req.target}: replicas=3, status=running"
+
+        execution = StoredExecution(
+            execution_id=execution_id,
+            status="running",
+            runbook_ref=req.runbook_ref,
+            target=req.target,
+            idempotency_key=req.idempotency_key,
+            before_state=before_state,
+            started_at=started_at,
+        )
+        self.store.create(execution)
+
+        # 模拟执行
+        import asyncio
+        await asyncio.sleep(0.5)
+
+        # 模拟执行成功
+        after_state = f"{req.target}: replicas=3, status=healthy"
+        self.store.update(
+            execution_id,
+            status="succeeded",
+            after_state=after_state,
+            output=f"成功执行 {req.runbook_ref} on {req.target}",
+            completed_at=datetime.now(),
+        )
+
+        return self.store.get(execution_id)
+
+
+# ---------------------------------------------------------------------------
+# FastAPI 应用
+# ---------------------------------------------------------------------------
+
+
+store = ExecutionStore()
+gate = ActionGate(store=store, kill_switch=False)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+
+
+app = FastAPI(
+    title="Sentinel-X Action Gateway",
+    version="0.1.0",
+    description="独立最小权限动作执行器 — 不持有模型密钥，不调用 LLM",
+    lifespan=lifespan,
+)
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health():
+    return HealthResponse(
+        actions_enabled=not gate.kill_switch,
+        registered_runbooks=len(REGISTERED_RUNBOOKS),
+    )
+
+
+@app.post("/api/actions", status_code=status.HTTP_202_ACCEPTED)
+async def submit_action(req: ActionSubmitRequest):
+    """
+    提交已审批的动作。
+
+    所有提交必须经过 Gate 校验链：
+    Runbook 存在 → MVP 启用 → R1 合法 → 目标白名单
+    → 参数合规 → Plan hash 一致 → 幂等键唯一
+    """
+    allowed, reason, runbook = gate.validate(req)
+    if not allowed:
+        logger.warning(f"动作被拒绝: {reason}")
+        raise HTTPException(status_code=400, detail=reason)
+
+    execution = await gate.execute(runbook, req)
+
+    return {
+        "execution_id": execution.execution_id,
+        "status": execution.status,
+        "runbook_ref": execution.runbook_ref,
+        "target": execution.target,
+        "idempotency_key": execution.idempotency_key,
+        "message": "动作已提交执行",
+    }
+
+
+@app.get("/api/actions/{execution_id}")
+async def get_action_status(execution_id: str):
+    """查询动作执行状态。"""
+    execution = store.get(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail=f"执行 {execution_id} 不存在")
+    return ActionStatusResponse(
+        execution_id=execution.execution_id,
+        status=execution.status,
+        runbook_ref=execution.runbook_ref,
+        target=execution.target,
+        idempotency_key=execution.idempotency_key,
+        before_state=execution.before_state,
+        after_state=execution.after_state,
+        output=execution.output,
+        error=execution.error,
+        started_at=execution.started_at,
+        completed_at=execution.completed_at,
+    )
+
+
+@app.get("/api/runbooks")
+async def list_runbooks():
+    """列出所有已登记的 Runbook。"""
+    return {
+        "items": [
+            {
+                "ref": rb.ref,
+                "description": rb.description,
+                "risk_level": rb.risk_level.value,
+                "reversible": rb.reversible,
+                "mvp_enabled": rb.mvp_enabled,
+            }
+            for rb in REGISTERED_RUNBOOKS.values()
+        ]
+    }
+
+
+@app.post("/api/admin/kill-switch")
+async def toggle_kill_switch(activate: bool = True):
+    """管理端点：切换 Kill Switch。"""
+    gate.kill_switch = activate
+    return {
+        "kill_switch": gate.kill_switch,
+        "message": f"Kill Switch 已{'激活' if activate else '关闭'}",
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8081)

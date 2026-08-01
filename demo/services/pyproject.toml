@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-x-demo-services"
+version = "0.1.0"
+description = "Sentinel-X 演练微服务 — order/inventory/payment"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[project.scripts]
+order-api = "sentinel_x_demo.order:main"
+inventory-api = "sentinel_x_demo.inventory:main"
+payment-api = "sentinel_x_demo.payment:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sentinel_x_demo"]

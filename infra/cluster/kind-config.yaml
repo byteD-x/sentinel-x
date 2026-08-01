@@ -1,0 +1,11 @@
+# kind 集群配置 — 备选方案
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: sentinel-x-local
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+networking:
+  apiServerAddress: "127.0.0.1"
+  apiServerPort: 6443

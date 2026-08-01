@@ -1,0 +1,72 @@
+---
+# Diagnostic ServiceAccount — 只读查询
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: diagnostic-sa
+  namespace: sentinel-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sentinel-diagnostic-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "endpoints", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  # 明确禁止
+  # - secrets (禁止)
+  # - pods/exec (禁止)
+  # - cluster-admin (禁止)
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sentinel-diagnostic-reader-binding
+subjects:
+  - kind: ServiceAccount
+    name: diagnostic-sa
+    namespace: sentinel-system
+roleRef:
+  kind: ClusterRole
+  name: sentinel-diagnostic-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+# Executor ServiceAccount — 受限写操作
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: executor-sa
+  namespace: sentinel-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sentinel-executor
+  namespace: demo-shop
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["order-api", "inventory-api", "payment-api"]
+    verbs: ["get", "patch"]
+  # 仅允许 patch 白名单 Deployment
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sentinel-executor-binding
+  namespace: demo-shop
+subjects:
+  - kind: ServiceAccount
+    name: executor-sa
+    namespace: sentinel-system
+roleRef:
+  kind: Role
+  name: sentinel-executor
+  apiGroup: rbac.authorization.k8s.io
