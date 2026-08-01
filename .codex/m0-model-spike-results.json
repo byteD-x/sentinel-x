@@ -1,0 +1,126 @@
+{
+  "model": "qwen2.5:7b",
+  "provider": "Ollama (local)",
+  "total_runs": 12,
+  "success_count": 12,
+  "failure_count": 0,
+  "success_rate": 1.0,
+  "avg_latency_ms": 10685.02327500058,
+  "p50_latency_ms": 10340.932399998565,
+  "p95_latency_ms": 17244.31860000186,
+  "p99_latency_ms": 17244.31860000186,
+  "avg_prompt_tokens": 265.25,
+  "avg_completion_tokens": 269.9166666666667,
+  "avg_total_tokens": 535.1666666666666,
+  "failure_modes": {},
+  "results": [
+    {
+      "scenario": "payment-service-latency",
+      "success": true,
+      "latency_ms": 17244.31860000186,
+      "prompt_tokens": 302,
+      "completion_tokens": 296,
+      "total_tokens": 598,
+      "error": null
+    },
+    {
+      "scenario": "payment-service-latency",
+      "success": true,
+      "latency_ms": 10720.639700000902,
+      "prompt_tokens": 302,
+      "completion_tokens": 277,
+      "total_tokens": 579,
+      "error": null
+    },
+    {
+      "scenario": "payment-service-latency",
+      "success": true,
+      "latency_ms": 9223.797800001194,
+      "prompt_tokens": 302,
+      "completion_tokens": 243,
+      "total_tokens": 545,
+      "error": null
+    },
+    {
+      "scenario": "order-db-errors",
+      "success": true,
+      "latency_ms": 10222.560800000792,
+      "prompt_tokens": 265,
+      "completion_tokens": 267,
+      "total_tokens": 532,
+      "error": null
+    },
+    {
+      "scenario": "order-db-errors",
+      "success": true,
+      "latency_ms": 10346.661899999162,
+      "prompt_tokens": 265,
+      "completion_tokens": 278,
+      "total_tokens": 543,
+      "error": null
+    },
+    {
+      "scenario": "order-db-errors",
+      "success": true,
+      "latency_ms": 7608.583999997791,
+      "prompt_tokens": 265,
+      "completion_tokens": 205,
+      "total_tokens": 470,
+      "error": null
+    },
+    {
+      "scenario": "inventory-stock-sync",
+      "success": true,
+      "latency_ms": 12302.717200000188,
+      "prompt_tokens": 268,
+      "completion_tokens": 316,
+      "total_tokens": 584,
+      "error": null
+    },
+    {
+      "scenario": "inventory-stock-sync",
+      "success": true,
+      "latency_ms": 10166.896300001099,
+      "prompt_tokens": 268,
+      "completion_tokens": 271,
+      "total_tokens": 539,
+      "error": null
+    },
+    {
+      "scenario": "inventory-stock-sync",
+      "success": true,
+      "latency_ms": 10663.138300002174,
+      "prompt_tokens": 268,
+      "completion_tokens": 288,
+      "total_tokens": 556,
+      "error": null
+    },
+    {
+      "scenario": "clean-no-issue",
+      "success": true,
+      "latency_ms": 10052.724700002727,
+      "prompt_tokens": 226,
+      "completion_tokens": 266,
+      "total_tokens": 492,
+      "error": null
+    },
+    {
+      "scenario": "clean-no-issue",
+      "success": true,
+      "latency_ms": 9327.307600000495,
+      "prompt_tokens": 226,
+      "completion_tokens": 255,
+      "total_tokens": 481,
+      "error": null
+    },
+    {
+      "scenario": "clean-no-issue",
+      "success": true,
+      "latency_ms": 10340.932399998565,
+      "prompt_tokens": 226,
+      "completion_tokens": 277,
+      "total_tokens": 503,
+      "error": null
+    }
+  ]
+}
