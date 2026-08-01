@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-x"
+version = "0.0.0"
+description = "AI 事故指挥中心：在隔离演练环境中演示 AI 辅助故障诊断与受控恢复"
+readme = "README.md"
+license = { text = "UNLICENSED" }
+requires-python = ">=3.13"
+authors = [
+    { name = "Sentinel-X Team" }
+]
+keywords = [
+    "incident-response",
+    "ai-ops",
+    "temporal",
+    "observability",
+    "kubernetes",
+    "demonstration",
+]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+]
+
+# Dependencies will be locked after M0 spike validation.
+# All are proposed and subject to change based on M0 evidence.
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+sentinel-doctor = "sentinel_x.cli:doctor"
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
