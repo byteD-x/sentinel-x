@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-x-diagnostics"
+version = "0.1.0"
+description = "Sentinel-X Diagnostic Gateway — 只读查询适配"
+requires-python = ">=3.13"
+dependencies = ["sentinel-x-contracts>=0.1", "pydantic>=2"]

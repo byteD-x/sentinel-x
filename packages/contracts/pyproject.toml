@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-x-contracts"
+version = "0.1.0"
+description = "Sentinel-X shared contracts and type definitions"
+requires-python = ">=3.13"
+dependencies = ["pydantic>=2"]

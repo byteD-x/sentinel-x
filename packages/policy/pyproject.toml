@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-x-policy"
+version = "0.1.0"
+description = "Sentinel-X Policy Engine — 风险分级与确定性策略校验"
+requires-python = ">=3.13"
+dependencies = ["sentinel-x-contracts>=0.1"]

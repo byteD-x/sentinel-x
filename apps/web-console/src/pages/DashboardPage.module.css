@@ -1,0 +1,102 @@
+.pageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.subtitle {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+.actions { display: flex; gap: 8px; }
+
+.btnPrimary, .btnSecondary {
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+.btnPrimary { background: var(--color-primary); color: #fff; }
+.btnSecondary { background: var(--color-border); color: var(--color-text); }
+.btnPrimary:hover, .btnSecondary:hover { opacity: 0.85; }
+
+.errorBanner {
+  background: rgba(248,81,73,0.1);
+  border: 1px solid rgba(248,81,73,0.3);
+  color: var(--color-danger);
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.empty {
+  text-align: center;
+  padding: 60px 0;
+  color: var(--color-text-muted);
+}
+.emptyHint { font-size: 14px; margin-top: 8px; }
+
+.table {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.tableHeader, .tableRow {
+  display: grid;
+  grid-template-columns: 100px 70px 1fr 1.5fr 90px;
+  gap: 12px;
+  padding: 12px 16px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.tableHeader {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tableRow {
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background 0.1s;
+}
+.tableRow:hover { background: rgba(255,255,255,0.03); }
+
+.colTime { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-muted); }
+
+.statusBadge, .sevBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.statusDetected { background: rgba(88,166,255,0.12); color: var(--color-info); }
+.statusActive { background: rgba(210,153,34,0.12); color: var(--color-warning); }
+.statusPending { background: rgba(139,148,158,0.12); color: var(--color-text-muted); }
+.statusResolved { background: rgba(63,185,80,0.12); color: var(--color-success); }
+.statusEscalated { background: rgba(188,140,255,0.12); color: #bc8cff; }
+.statusFailed { background: rgba(248,81,73,0.12); color: var(--color-danger); }
+
+.sevCritical { color: var(--color-danger); font-weight: 600; }
+.sevWarning { color: var(--color-warning); }
+.sevInfo { color: var(--color-info); }
