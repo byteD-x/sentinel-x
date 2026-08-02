@@ -4,6 +4,7 @@ Action Gateway 测试 — 覆盖完整校验链和安全边界。
 
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -52,7 +53,10 @@ def _make_request(
         "idempotency_key": f"test-key-{hashlib.sha256(str(hash(str(parameters))).encode()).hexdigest()[:12]}",
         "plan_hash": plan_hash,
         "approval_id": "approval-test-001",
-        "approval_token": "test-token",
+        "approval_token": "test-approval-token-001",
+        "approval_expires_at": (
+            datetime.now(timezone.utc) + timedelta(minutes=30)
+        ).isoformat(),
         "incident_id": incident_id,
         "audience": "sentinel-action-gateway",
     }
@@ -115,6 +119,12 @@ class TestRejections:
         assert resp.status_code == 400
         assert "hash" in resp.json()["detail"].lower()
 
+    async def test_unknown_field_rejected(self, client):
+        data = _make_request()
+        data["unexpected"] = "not-allowed"
+        resp = await client.post("/api/actions", json=data)
+        assert resp.status_code == 422
+
     async def test_duplicate_idempotency_key_rejected(self, client):
         data = _make_request()
         # 第一次
@@ -132,6 +142,15 @@ class TestRejections:
             parameters={"replicas": 100},  # 超出最大值 10
         ))
         assert resp.status_code == 400
+
+    async def test_expired_approval_rejected(self, client):
+        data = _make_request()
+        data["approval_expires_at"] = (
+            datetime.now(timezone.utc) - timedelta(minutes=1)
+        ).isoformat()
+        resp = await client.post("/api/actions", json=data)
+        assert resp.status_code == 400
+        assert "过期" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio

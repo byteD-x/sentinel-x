@@ -18,7 +18,7 @@ install: ## 安装所有依赖
 	cd apps/web-console && npm install
 
 test: ## 运行快速质量门禁
-	pytest packages/domain/tests/ apps/control-api/tests/ apps/incident-worker/tests/ apps/action-gateway/tests/ -v --tb=short --asyncio-mode=auto
+	python -m pytest -v --tb=short --asyncio-mode=auto
 
 test-e2e: ## 运行 E2E 测试
 	pytest tests/ -v --tb=short --asyncio-mode=auto

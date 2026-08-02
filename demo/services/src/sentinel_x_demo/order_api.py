@@ -63,7 +63,7 @@ async def create_order(order: OrderCreate, request: Request):
     order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
     # 应用故障注入
-    fault_error = fault_config.apply()
+    fault_error = await fault_config.apply_async()
     if fault_error:
         raise HTTPException(status_code=503, detail=f"[order-api] {fault_error}")
 
@@ -97,7 +97,7 @@ async def create_order(order: OrderCreate, request: Request):
                 json={"order_id": order_id, "amount": total_amount},
                 headers={"x-request-id": request_id},
             )
-            if pay_resp.status_code == 200:
+            if 200 <= pay_resp.status_code < 300:
                 payment_status = pay_resp.json().get("status", "ok")
             else:
                 payment_status = "failed"

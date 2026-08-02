@@ -14,25 +14,25 @@
 | ID | 风险 | L | I | 分数 | Owner | 状态 |
 | --- | --- | ---: | ---: | ---: | --- | --- |
 | RSK-001 | 主场景故障与 Runbook 无真实因果关系 | 2 | 5 | 10 | product/architecture | MITIGATING |
-| RSK-002 | Action 超时导致重复副作用 | 3 | 5 | action/runtime | OPEN |
-| RSK-003 | 审批可篡改、重放或被错误身份消费 | 3 | 5 | security | OPEN |
-| RSK-004 | 遥测提示注入改变调查或外发边界 | 4 | 5 | AI/security | OPEN |
-| RSK-005 | Temporal 与 PostgreSQL 投影漂移 | 3 | 4 | runtime/data | OPEN |
-| RSK-006 | 六场景/prompt 泄漏导致评测虚高 | 4 | 4 | evaluation | OPEN |
-| RSK-007 | 完整观测栈超出 Windows 主机资源 | 4 | 3 | platform | OPEN |
-| RSK-008 | 数据库锁或网络故障 cleanup 不可靠 | 3 | 4 | scenario | OPEN |
-| RSK-009 | 高基数/大查询拖垮观测栈或泄露数据 | 3 | 4 | observability | OPEN |
-| RSK-010 | local-only 身份被误述为生产级鉴权 | 3 | 4 | product/security | OPEN |
-| RSK-011 | ground truth 泄露给 Investigator | 3 | 4 | scenario/evaluation | OPEN |
-| RSK-012 | light profile 被误报为完整 E2E | 4 | 3 | release | OPEN |
-| RSK-013 | 模型波动、限流或价格变化破坏复现 | 4 | 3 | AI/evaluation | OPEN |
-| RSK-014 | 项目范围过重，停留在基础设施搭建 | 4 | 4 | project | OPEN |
-| RSK-015 | 恶意/敏感遥测进入日志、模型或事故包 | 3 | 5 | security/data | OPEN |
-| RSK-016 | Workflow 升级产生非确定性错误 | 3 | 5 | runtime/release | OPEN |
-| RSK-017 | Scenario Runner 或 Gateway 权限越界 | 2 | 5 | platform/security | OPEN |
-| RSK-018 | 自动恢复被误当作 AI 修复成果 | 4 | 3 | evaluation/product | MITIGATING |
-| RSK-019 | 安全指标通过“拒绝一切”被投机满足 | 3 | 4 | evaluation/security | OPEN |
-| RSK-020 | 缺少 Git/版本锁定导致报告无法追溯 | 5 | 3 | release | OPEN |
+| RSK-002 | Action 超时导致重复副作用 | 3 | 5 | 15 | action/runtime | OPEN |
+| RSK-003 | 审批可篡改、重放或被错误身份消费 | 3 | 5 | 15 | security | OPEN |
+| RSK-004 | 遥测提示注入改变调查或外发边界 | 4 | 5 | 20 | AI/security | OPEN |
+| RSK-005 | Temporal 与 PostgreSQL 投影漂移 | 3 | 4 | 12 | runtime/data | OPEN |
+| RSK-006 | 六场景/prompt 泄漏导致评测虚高 | 4 | 4 | 16 | evaluation | OPEN |
+| RSK-007 | 完整观测栈超出 Windows 主机资源 | 4 | 3 | 12 | platform | OPEN |
+| RSK-008 | 数据库锁或网络故障 cleanup 不可靠 | 3 | 4 | 12 | scenario | OPEN |
+| RSK-009 | 高基数/大查询拖垮观测栈或泄露数据 | 3 | 4 | 12 | observability | OPEN |
+| RSK-010 | local-only 身份被误述为生产级鉴权 | 3 | 4 | 12 | product/security | OPEN |
+| RSK-011 | ground truth 泄露给 Investigator | 3 | 4 | 12 | scenario/evaluation | OPEN |
+| RSK-012 | light profile 被误报为完整 E2E | 4 | 3 | 12 | release | OPEN |
+| RSK-013 | 模型波动、限流或价格变化破坏复现 | 4 | 3 | 12 | AI/evaluation | OPEN |
+| RSK-014 | 项目范围过重，停留在基础设施搭建 | 4 | 4 | 16 | project | OPEN |
+| RSK-015 | 恶意/敏感遥测进入日志、模型或事故包 | 3 | 5 | 15 | security/data | OPEN |
+| RSK-016 | Workflow 升级产生非确定性错误 | 3 | 5 | 15 | runtime/release | OPEN |
+| RSK-017 | Scenario Runner 或 Gateway 权限越界 | 2 | 5 | 10 | platform/security | OPEN |
+| RSK-018 | 自动恢复被误当作 AI 修复成果 | 4 | 3 | 12 | evaluation/product | MITIGATING |
+| RSK-019 | 安全指标通过“拒绝一切”被投机满足 | 3 | 4 | 12 | evaluation/security | OPEN |
+| RSK-020 | 缺少 Git/版本锁定导致报告无法追溯 | 5 | 3 | 15 | release | OPEN |
 
 ## 3. 处置明细
 

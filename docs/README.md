@@ -2,7 +2,14 @@
 
 ## 1. 当前状态
 
-当前是 **D0 开发前文档基线**：有完整目标、契约、计划和安全默认模板，没有业务代码、可运行命令、Git commit 或实测指标。所有技术选择仍为 `proposed`，所有数值为初始目标/待测。
+当前是 **D1-light 原型建设中**：已有控制台、Control API、Action Gateway、Incident Worker、共享包、演练服务、场景 fixture、基础设施草案和自动化测试。文档仍是跨模块契约与目标边界的事实来源；代码中已落地的 light/prototype 能力应回链到证据账本，未完成的 full profile、持久存储、Temporal Server replay、数据库绑定审批和固定 benchmark 仍保持 `proposed` 或 `untested`。
+
+阅读本文时请区分：
+
+- `implemented`：代码或配置可定位，但不等于完整验收。
+- `tested`：有本地可重复命令通过，但只覆盖命令声明的范围。
+- `measured`：固定场景/环境/样本报告完成后才能用于对外指标。
+- `proposed`：目标方案或设计约束，不能写成已实现能力。
 
 ## 2. 推荐阅读路径
 

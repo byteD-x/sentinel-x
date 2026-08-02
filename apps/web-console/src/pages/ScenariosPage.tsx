@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { ArrowUpRight, CheckCircle2, FlaskConical, LoaderCircle, Play, ShieldAlert } from 'lucide-react'
 import styles from './ScenariosPage.module.css'
 
 interface Scenario {
@@ -9,6 +11,11 @@ interface Scenario {
   category: string
 }
 
+interface RunResult {
+  scenario: string
+  incidentId: string
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   network: '网络',
   application: '应用',
@@ -17,11 +24,20 @@ const CATEGORY_LABELS: Record<string, string> = {
   resource: '资源',
 }
 
+const CATEGORY_CLASS: Record<string, string> = {
+  network: styles.network,
+  application: styles.application,
+  database: styles.database,
+  kubernetes: styles.kubernetes,
+  resource: styles.resource,
+}
+
 export function ScenariosPage() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
+  const [runResult, setRunResult] = useState<RunResult | null>(null)
 
   const fetchScenarios = useCallback(async () => {
     try {
@@ -41,51 +57,74 @@ export function ScenariosPage() {
 
   const handleRun = async (scenarioId: string) => {
     setRunningId(scenarioId)
+    setRunResult(null)
     try {
       const res = await fetch(`/api/scenarios/${scenarioId}/run`, { method: 'POST' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || `HTTP ${res.status}`)
+      }
       const data = await res.json()
-      alert(`场景已启动！事故 ID: ${data.incident_id}`)
+      setRunResult({ scenario: scenarioId, incidentId: data.incident_id })
     } catch (e) {
-      alert(`启动失败: ${e instanceof Error ? e.message : '未知错误'}`)
+      setError(e instanceof Error ? e.message : '启动失败')
     } finally {
       setRunningId(null)
-      fetchScenarios()
     }
   }
 
   return (
-    <div>
-      <div className={styles.pageHeader}>
+    <div className={styles.page}>
+      <header className={styles.pageHeader}>
         <div>
+          <div className={styles.eyebrow}><FlaskConical size={14} aria-hidden="true" /> SCENARIO CATALOG</div>
           <h1 className={styles.title}>演练场景</h1>
-          <p className={styles.subtitle}>{scenarios.length} 个已登记场景</p>
+          <p className={styles.subtitle}>固定故障、固定根因和固定恢复断言，用来验证调查链路而不是模型自评。</p>
         </div>
-      </div>
+        <div className={styles.catalogMeta}><strong>{scenarios.length}</strong><span>registered scenarios</span></div>
+      </header>
 
-      {error && <div className={styles.error}>⚠️ {error}</div>}
+      {runResult && (
+        <div className={styles.runNotice} role="status">
+          <CheckCircle2 size={17} aria-hidden="true" />
+          <span><b>{runResult.scenario}</b> 已启动，事故已写入控制面。</span>
+          <Link to={`/incidents/${runResult.incidentId}`}>打开事故 <ArrowUpRight size={14} aria-hidden="true" /></Link>
+        </div>
+      )}
+
+      {error && (
+        <div className={styles.error} role="alert"><ShieldAlert size={16} aria-hidden="true" />{error}</div>
+      )}
 
       {loading ? (
-        <div className={styles.empty}>加载中...</div>
+        <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} />加载场景目录</div>
       ) : (
         <div className={styles.grid}>
           {scenarios.map(scenario => (
-            <div key={scenario.id} className={styles.card}>
-              <div className={styles.cardHeader}>
-                <span className={styles.cardName}>{scenario.name}</span>
-                <span className={styles.cardCategory}>
-                  {CATEGORY_LABELS[scenario.category] || scenario.category}
-                </span>
+            <article key={scenario.id} className={styles.scenarioRow}>
+              <div className={`${styles.categoryRail} ${CATEGORY_CLASS[scenario.category] || ''}`} />
+              <div className={styles.scenarioBody}>
+                <div className={styles.scenarioTopline}>
+                  <span className={styles.scenarioId}>{scenario.name}</span>
+                  <span className={styles.category}>{CATEGORY_LABELS[scenario.category] || scenario.category}</span>
+                </div>
+                <h2>{scenario.description}</h2>
+                <div className={styles.scenarioMeta}>
+                  <span>schema / v{scenario.version}</span>
+                  <span>profile / light</span>
+                  <span>ground truth / fixed</span>
+                </div>
               </div>
-              <p className={styles.cardDesc}>{scenario.description}</p>
               <button
-                className={styles.runBtn}
+                className={styles.runButton}
+                type="button"
                 onClick={() => handleRun(scenario.id)}
                 disabled={runningId === scenario.id}
               >
-                {runningId === scenario.id ? '启动中...' : '▶ 启动演练'}
+                {runningId === scenario.id ? <LoaderCircle className={styles.spin} size={16} /> : <Play size={15} fill="currentColor" aria-hidden="true" />}
+                {runningId === scenario.id ? '启动中' : '启动演练'}
               </button>
-            </div>
+            </article>
           ))}
         </div>
       )}

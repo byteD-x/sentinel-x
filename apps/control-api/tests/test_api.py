@@ -62,6 +62,21 @@ class TestIncidents:
         response = await client.get("/api/incidents/nonexistent")
         assert response.status_code == 404
 
+    async def test_create_incident_rejects_unknown_fields(self, client):
+        response = await client.post("/api/incidents", json={
+            "unexpected_top": True,
+            "alert_source": {
+                "alertmanager_id": "test-extra",
+                "fingerprint": "fp-extra",
+                "alert_name": "Extra Field Test",
+                "severity": "warning",
+                "description": "Test incident",
+                "started_at": "2026-08-01T21:00:00Z",
+                "unexpected_nested": "ignored-before-fix",
+            }
+        })
+        assert response.status_code == 422
+
     async def test_timeline(self, client):
         create_resp = await client.post("/api/incidents", json={
             "alert_source": {
@@ -175,6 +190,38 @@ class TestScenarios:
         assert response.status_code == 200
         data = response.json()
         assert len(data["items"]) == 6  # 6 个预置场景
+
+    async def test_run_scenario_creates_incident_and_approval(self, client):
+        response = await client.post("/api/scenarios/order-db-errors@1/run")
+        assert response.status_code == 202
+        data = response.json()
+        assert data["status"] == "AWAITING_APPROVAL"
+
+        incident_id = data["incident_id"]
+        incident_response = await client.get(f"/api/incidents/{incident_id}")
+        assert incident_response.status_code == 200
+
+        timeline_response = await client.get(f"/api/incidents/{incident_id}/timeline")
+        event_types = {event["event_type"] for event in timeline_response.json()["events"]}
+        assert {"scenario.started", "evidence.collected", "hypothesis.generated"} <= event_types
+
+        approvals_response = await client.get(f"/api/incidents/{incident_id}/approvals")
+        approvals = approvals_response.json()["items"]
+        assert len(approvals) == 1
+        assert approvals[0]["runbook_ref"] == "restart_deployment@1"
+
+        approve_response = await client.put(
+            f"/api/incidents/{incident_id}/approvals/{approvals[0]['id']}",
+            json={"approved": True, "reason": "演练验证通过"},
+        )
+        assert approve_response.status_code == 200
+
+        resolved_response = await client.get(f"/api/incidents/{incident_id}")
+        assert resolved_response.json()["status"] == "RESOLVED"
+
+        final_timeline = await client.get(f"/api/incidents/{incident_id}/timeline")
+        final_event_types = {event["event_type"] for event in final_timeline.json()["events"]}
+        assert {"action.started", "action.completed", "recovery.verified"} <= final_event_types
 
 
 @pytest.mark.asyncio

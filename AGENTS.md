@@ -5,14 +5,14 @@
 ## 1. 仓库画像
 
 - 项目：`sentinel-x`
-- 当前阶段：开发前设计基线，仅有文档，尚无可运行实现。
+- 当前阶段：D1-light 原型建设中，已有代码、测试、前端和 infra 草案；full MVP 尚未完成。
 - 目标形态：monorepo；模块化单体控制面 + 独立 Action Gateway + 隔离演练环境。
-- 拟议后端：Python、FastAPI、Temporal、PostgreSQL。
-- 拟议前端：React、TypeScript。
-- 拟议基础设施：Kubernetes、OpenTelemetry、Prometheus、Loki、Tempo。
+- 已有后端原型：Python、FastAPI、Pydantic、pytest；Temporal/PostgreSQL 为目标能力，未完成 full 验证。
+- 已有前端原型：React、TypeScript、Vite。
+- 拟议/草案基础设施：Kubernetes、OpenTelemetry、Prometheus、Loki、Tempo。
 - 事实来源：[README.md](README.md) 与 [docs/README.md](docs/README.md)。
 
-“拟议”不是“已实现”。没有代码、命令输出或评测报告支撑时，不得声称功能、测试、性能或安全指标已经达成。
+“代码存在”不是“能力完成”，“拟议”也不是“已实现”。没有命令输出、评测报告或证据账本支撑时，不得声称功能、测试、性能或安全指标已经达成。
 
 ## 2. 开始修改前
 

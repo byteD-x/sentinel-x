@@ -1,16 +1,26 @@
 :root {
-  --color-bg: #0a0e14;
-  --color-surface: #141b22;
-  --color-border: #212a33;
-  --color-text: #c9d1d9;
-  --color-text-muted: #6e7681;
-  --color-primary: #58a6ff;
-  --color-danger: #f85149;
-  --color-warning: #d29922;
-  --color-success: #3fb950;
-  --color-info: #58a6ff;
-  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --color-bg: #0c0f11;
+  --color-surface: #11161a;
+  --color-surface-raised: #171e23;
+  --color-surface-soft: #0f1417;
+  --color-border: #273139;
+  --color-border-strong: #3b4851;
+  --color-text: #ecf2f0;
+  --color-text-muted: #94a2a8;
+  --color-text-dim: #5e6a70;
+  --color-accent: #ffb454;
+  --color-accent-soft: rgba(255, 180, 84, 0.12);
+  --color-primary: var(--color-info);
+  --color-danger: #ff716d;
+  --color-danger-soft: rgba(255, 113, 109, 0.12);
+  --color-warning: #f4c66e;
+  --color-warning-soft: rgba(244, 198, 110, 0.12);
+  --color-success: #65d6a3;
+  --color-success-soft: rgba(101, 214, 163, 0.12);
+  --color-info: #85cfff;
+  --color-info-soft: rgba(133, 207, 255, 0.12);
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --radius: 6px;
 }
 
@@ -20,7 +30,13 @@
   padding: 0;
 }
 
+html {
+  min-width: 320px;
+  background: var(--color-bg);
+}
+
 body {
+  min-width: 320px;
   font-family: var(--font-sans);
   background: var(--color-bg);
   color: var(--color-text);
@@ -28,16 +44,34 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+button,
 a {
-  color: var(--color-primary);
-  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button {
+  border: 0;
   cursor: pointer;
-  font-family: inherit;
+  font: inherit;
 }
 
-code, pre {
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code,
+pre {
   font-family: var(--font-mono);
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-bg);
 }

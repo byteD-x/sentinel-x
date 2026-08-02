@@ -133,18 +133,50 @@ async def call_llm_structured(
 
     安全: API key 仅在此 Activity 中使用，不传递给 Workflow。
     """
-    await asyncio.sleep(0.5)
+    from sentinel_x_incident_worker.llm_client import LLMClient
 
-    # 模拟 LLM 调用
-    hypothesis_id = str(uuid4())
+    client_options = {
+        "base_url": base_url or "http://localhost:11434/v1",
+        "api_key": api_key or "ollama",
+        "model": model or "qwen2.5:7b",
+        "timeout_seconds": timeout_seconds,
+        "max_output_tokens": max_output_tokens,
+    }
+    client = LLMClient(**client_options)
+
+    result = await client.structured_output(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        output_schema=output_schema,
+    )
+
+    if not result.success:
+        logger.error(f"LLM 调用失败: {result.error}")
+        # 返回降级结果
+        return {
+            "id": str(uuid4()),
+            "statement": "LLM 调用失败，使用降级假设",
+            "confidence": 0.3,
+            "root_cause_category": "unknown",
+            "affected_service": "unknown",
+            "tokens_used": result.tokens_total,
+            "model": result.model,
+            "error": result.error,
+        }
+
+    parsed_output = result.parsed_output or {}
     return {
-        "id": hypothesis_id,
-        "statement": "基于证据的根因假设",
-        "confidence": 0.75,
-        "root_cause_category": "application",
-        "affected_service": "payment-api",
-        "tokens_used": 520,
-        "model": model or "unknown",
+        "id": str(uuid4()),
+        "statement": parsed_output.get("statement", ""),
+        "confidence": parsed_output.get("confidence", 0.5),
+        "root_cause_category": parsed_output.get("root_cause_category", "unknown"),
+        "affected_service": parsed_output.get("affected_service", ""),
+        "supporting_evidence_refs": parsed_output.get("supporting_evidence_refs", []),
+        "opposing_evidence_refs": parsed_output.get("opposing_evidence_refs", []),
+        "suggested_next_steps": parsed_output.get("suggested_next_steps", []),
+        "needs_human_escalation": parsed_output.get("needs_human_escalation", False),
+        "tokens_used": result.tokens_total,
+        "model": result.model,
     }
 
 

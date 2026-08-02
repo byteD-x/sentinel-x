@@ -13,6 +13,7 @@ dependencies = [
     "sentinel-x-policy>=0.1",
     "sentinel-x-diagnostics>=0.1",
     "temporalio>=1.31",
+    "openai>=1.0",
     "pydantic>=2",
 ]
 

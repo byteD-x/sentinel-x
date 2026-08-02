@@ -23,30 +23,32 @@
 
 | 指标 | 值 |
 | --- | --- |
-| 成功率 | **100%** (12/12) |
+| JSON 可解析次数 | 12/12（探索性样本） |
+| 严格 Schema 通过率 | 未完成正式统计；已观察到 `confidence: 85` 越界样本 |
 | 平均延迟 | 10,685ms |
 | P50 延迟 | 10,341ms |
-| P95 延迟 | 17,244ms |
-| P99 延迟 | 17,244ms |
+| 延迟范围 | 详见原始 JSON；样本数 12，不报告 p95/p99 |
 | 平均 Prompt Tokens | 265 |
 | 平均 Completion Tokens | 270 |
 | 平均 Total Tokens | 535 |
 
 ## 4. 关键发现
 
-### 4.1 结构化输出能力 ✅
+### 4.1 结构化输出能力
 
-qwen2.5:7b 成功生成 12/12 个完全符合 JSON Schema 的 Hypothesis 结构：
+qwen2.5:7b 在 12 次探索性运行中均生成了可解析 JSON，并大体覆盖 Hypothesis 结构字段：
 - 所有必填字段均被填充
 - 枚举值正确使用（`root_cause_category` 正确选择 `application`/`database`/`network`/`kubernetes`/`unknown`）
 - evidence 引用使用规范的 `evidence_id` + `relevance` 结构
 - `suggested_next_steps` 合理且非破坏性
 
-### 4.2 Schema 校验缺口 ⚠️
+但由于已观察到数值范围越界，本报告不能声明“完全符合 JSON Schema”或“结构化输出稳定 100%”。正式结果必须由服务端 Pydantic/JSON Schema 校验器逐项判定。
+
+### 4.2 Schema 校验缺口
 
 模型返回 `confidence: 85` 而非 Schema 要求的 `0.0~1.0` 范围。**这验证了架构文档的核心安全原则：模型输出不能直接信任，必须经过服务端 Schema 校验层过滤。** 在 Sentinel-X 中，所有模型输出应通过 Pydantic 严格校验后再写入数据库。
 
-### 4.3 模型可用性风险 ☢️
+### 4.3 模型可用性风险
 
 原先拉取的 4 个 cloud 模型（deepseek-v3.2, glm-5, kimi-k2.5, minimax-m2.5）全部已退役（410 Gone）。**本地开发的模型可用性完全依赖 Ollama 的模型更新策略。** 正式开发时应：
 1. 锁定特定模型版本（而非 `:latest` 或 `:cloud`）
@@ -55,7 +57,7 @@ qwen2.5:7b 成功生成 12/12 个完全符合 JSON Schema 的 Hypothesis 结构�
 
 ### 4.4 延迟评估
 
-本地 7B 模型延迟约 10 秒/请求。对于事故调查场景（非实时交互），此延迟可接受，但需要为 Investigator 设置合理的调查预算上限（`INVESTIGATION_MAX_SECONDS` 默认 480s，预算充足）。
+本地 7B 模型在该机器上的单次延迟大多约 10 秒。由于样本数只有 12，本报告只作为容量估算线索，不给 p95/p99 或稳定性结论。正式评测需记录硬件、模型版本、样本数、失败分类和原始输出。
 
 ### 4.5 Token 消耗
 
@@ -90,7 +92,7 @@ qwen2.5:7b 成功生成 12/12 个完全符合 JSON Schema 的 Hypothesis 结构�
 
 | ADR | 验证结果 | 建议状态 |
 | --- | --- | --- |
-| ADR-0005（遥测为不可信输入） | **强化**：模型输出也需要 Schema 二次校验 | accepted（有证据） |
+| ADR-0005（遥测为不可信输入） | **强化**：模型输出也需要 Schema 二次校验 | 保持 proposed/待评审；本 spike 只能作为支持证据之一 |
 
 ## 7. 后续行动
 
@@ -101,4 +103,4 @@ qwen2.5:7b 成功生成 12/12 个完全符合 JSON Schema 的 Hypothesis 结构�
 
 ## 8. 结论
 
-✅ **结构化输出可行。** qwen2.5:7b 本地模型能够稳定生成符合 Sentinel-X Hypothesis Schema 的结构化输出。100% 成功率，Token 和延迟在预算范围内。模型输出验证需要服务端二次校验（Pydantic），这是架构中已规划的安全措施。
+结论：qwen2.5:7b 本地模型具备生成 Hypothesis JSON 的初步可行性，但该 spike 只证明“可继续评估”，不证明稳定通过严格 Schema、不证明正式延迟分位数，也不支持任何对外准确率或可靠性声明。下一阶段必须以服务端校验器、固定样本集和失败分类重新统计。

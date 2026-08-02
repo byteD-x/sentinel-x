@@ -2,7 +2,15 @@
 
 ## 1. 当前状态
 
-仓库当前没有代码、容器镜像、集群清单或可运行脚本。本文定义未来开发环境和部署接口，文中的 `make ...` 为 **目标任务名**，不是当前已实现命令。首次代码提交必须同步实际命令和验证输出。
+仓库当前已有 light/prototype 代码、Makefile、前端构建、Python 测试和基础 Kubernetes/observability 清单草案。本文同时记录已存在的本地入口和 full profile 目标接口；未经过本地集群、镜像和完整观测栈验证的内容仍标记为目标，不视为已发布部署能力。
+
+当前可用的本地验证入口包括：
+
+- `python -m pytest ...`：运行指定 Python 测试目录。
+- `npm run build`（`apps/web-console`）：构建 React 控制台。
+- `make test`：目标为快速质量门禁，需持续与根 `pytest` 收集范围保持一致。
+
+`make demo-up` / `make demo-down` 仍依赖 k3d/kind 与 full profile 资源基准，不能作为已验证演练生命周期声明。
 
 ## 2. 支持范围
 
@@ -29,7 +37,7 @@ M0 前不写死运行时版本。选择后使用 `.python-version`/锁文件、`
 | `full` | 8 cores | 12 GB | 30 GB | 完整 K8s/观测/演练/E2E |
 | `ci` | 4–8 cores | 8 GB | 20 GB | 分层临时集成测试 |
 
-`make doctor` 未来应检测 Docker、虚拟化、端口、内存、磁盘、工具版本、时钟和本地目录权限，并以非零退出码报告阻断项。
+`make doctor` 当前为轻量依赖提示；未来应检测 Docker、虚拟化、端口、内存、磁盘、工具版本、时钟和本地目录权限，并以非零退出码报告阻断项。
 
 ## 4. 网络与端口规划
 

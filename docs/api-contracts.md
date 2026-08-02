@@ -2,7 +2,9 @@
 
 ## 1. 状态与事实来源
 
-本文定义开发前详细 API 语义，当前没有可运行端点。实现后，版本化 OpenAPI、生成的 JSON Schema 和契约测试成为执行事实来源；本文维护跨端点规则和设计理由。
+本文定义目标 API 语义和安全边界。当前仓库已有 light/prototype FastAPI 端点，但实现路径、请求体和安全门禁尚未完全收敛到本文：Control API 仍使用 `/api/...`，Action Gateway 仍使用 prototype `/api/actions`，正式 `/api/v1` 与 `/internal/v1`、HMAC/CSRF/TokenReview/DB 绑定审批等门禁仍属于未完成项。light 场景启动会创建内存事故、证据和审批记录；批准后的执行/验证事件是 `light-fixture`，不代表真实 Kubernetes 写入。
+
+实现收敛前，本文是目标契约；代码与测试只能证明 prototype 行为。完成 D1/D2 门禁后，版本化 OpenAPI、生成的 JSON Schema 和契约测试才成为执行事实来源；本文继续维护跨端点规则和设计理由。
 
 公共前缀：`/api/v1`；内部 Action Gateway 前缀：`/internal/v1`。所有时间为 UTC RFC 3339，字段为 `snake_case`，未知 JSON 字段默认拒绝。
 

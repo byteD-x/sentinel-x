@@ -16,6 +16,7 @@ Sentinel-X Control API — 主应用入口。
 """
 
 import asyncio
+import hashlib
 import json
 import random
 from contextlib import asynccontextmanager
@@ -27,7 +28,7 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # 精简内联模型 — 避免依赖 contracts 包的导入问题
@@ -61,7 +62,11 @@ class IncidentSeverity(str, Enum):
     INFO = "info"
 
 
-class AlertSource(BaseModel):
+class StrictBaseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class AlertSource(StrictBaseModel):
     alertmanager_id: str
     fingerprint: str
     alert_name: str
@@ -70,7 +75,7 @@ class AlertSource(BaseModel):
     started_at: datetime
 
 
-class IncidentCreate(BaseModel):
+class IncidentCreate(StrictBaseModel):
     alert_source: AlertSource
 
 
@@ -103,7 +108,7 @@ class TimelineEvent(BaseModel):
     timestamp: datetime
 
 
-class ApprovalRequest(BaseModel):
+class ApprovalRequest(StrictBaseModel):
     plan_id: str
     runbook_ref: str
     target: str
@@ -113,7 +118,7 @@ class ApprovalRequest(BaseModel):
     hypothesis_id: str
 
 
-class ApprovalDecision(BaseModel):
+class ApprovalDecision(StrictBaseModel):
     approved: bool
     reason: str
 
@@ -247,6 +252,25 @@ class InMemoryStore:
             return None
         return self._add_timeline_event(incident, event_type, actor, payload)
 
+    def set_status(
+        self,
+        incident: StoredIncident,
+        new_status: IncidentStatus,
+        reason: str,
+        actor: str = "system",
+    ) -> None:
+        """更新演示事故状态，并留下可回放的状态事件。"""
+        old_status = incident.status
+        incident.status = new_status
+        incident.updated_at = datetime.now()
+        incident.version += 1
+        self._add_timeline_event(
+            incident,
+            "incident.status_changed",
+            actor,
+            {"from": old_status.value, "to": new_status.value, "reason": reason},
+        )
+
     def get_timeline(
         self,
         incident_id: str,
@@ -299,6 +323,64 @@ class InMemoryStore:
             approval["incident_id"], event_type, f"approver:{decided_by}",
             {"approved": decision.approved, "reason": decision.reason},
         )
+
+        incident = self._incidents.get(approval["incident_id"])
+        if incident:
+            if decision.approved:
+                if incident.status not in {
+                    IncidentStatus.RESOLVED,
+                    IncidentStatus.ESCALATED,
+                    IncidentStatus.FAILED,
+                }:
+                    self.set_status(incident, IncidentStatus.EXECUTING, "人工批准 R1 动作")
+                self._add_timeline_event(
+                    incident,
+                    "action.started",
+                    "action_gateway_fixture",
+                    {
+                        "runbook_ref": approval["runbook_ref"],
+                        "target": approval["target"],
+                        "mode": "light-fixture",
+                    },
+                )
+                if incident.status not in {
+                    IncidentStatus.RESOLVED,
+                    IncidentStatus.ESCALATED,
+                    IncidentStatus.FAILED,
+                }:
+                    self.set_status(incident, IncidentStatus.VERIFYING, "动作完成，开始检查恢复")
+                self._add_timeline_event(
+                    incident,
+                    "action.completed",
+                    "action_gateway_fixture",
+                    {"status": "succeeded", "before_state": "degraded", "after_state": "healthy"},
+                )
+                if incident.status not in {
+                    IncidentStatus.RESOLVED,
+                    IncidentStatus.ESCALATED,
+                    IncidentStatus.FAILED,
+                }:
+                    self.set_status(incident, IncidentStatus.RESOLVED, "恢复窗口验证通过")
+                incident.resolved_at = incident.resolved_at or datetime.now()
+                self._add_timeline_event(
+                    incident,
+                    "recovery.verified",
+                    "verification_fixture",
+                    {"result": "passed", "window_seconds": 60},
+                )
+            else:
+                if incident.status not in {
+                    IncidentStatus.RESOLVED,
+                    IncidentStatus.ESCALATED,
+                    IncidentStatus.FAILED,
+                }:
+                    self.set_status(incident, IncidentStatus.ESCALATED, "人工拒绝恢复动作")
+                self._add_timeline_event(
+                    incident,
+                    "incident.escalated",
+                    "system",
+                    {"reason": decision.reason},
+                )
         return approval
 
     def add_scenario(self, scenario: dict) -> None:
@@ -320,6 +402,7 @@ def _store_demo_scenarios(store: InMemoryStore) -> None:
             "version": 1,
             "description": "Payment API 高延迟：inventory-api 网络超时导致级联延迟",
             "category": "network",
+            "allowlisted_runbooks": ["restart_deployment@1"],
         },
         {
             "id": "order-db-errors@1",
@@ -327,6 +410,7 @@ def _store_demo_scenarios(store: InMemoryStore) -> None:
             "version": 1,
             "description": "Order Service 数据库连接池耗尽导致 5xx 错误",
             "category": "database",
+            "allowlisted_runbooks": ["restart_deployment@1"],
         },
         {
             "id": "inventory-split-brain@1",
@@ -334,6 +418,7 @@ def _store_demo_scenarios(store: InMemoryStore) -> None:
             "version": 1,
             "description": "Redis 主从切换后 split-brain 导致库存数据不一致",
             "category": "application",
+            "allowlisted_runbooks": ["restart_deployment@1"],
         },
         {
             "id": "payment-pod-crash@1",
@@ -341,6 +426,7 @@ def _store_demo_scenarios(store: InMemoryStore) -> None:
             "version": 1,
             "description": "Payment Pod 因 OOM 崩溃，Kubernetes 自动重启恢复",
             "category": "kubernetes",
+            "allowlisted_runbooks": ["no_op"],
         },
         {
             "id": "inventory-cpu-saturation@1",
@@ -348,6 +434,7 @@ def _store_demo_scenarios(store: InMemoryStore) -> None:
             "version": 1,
             "description": "Inventory CPU 饱和，需要扩容",
             "category": "resource",
+            "allowlisted_runbooks": ["scale_deployment@1"],
         },
         {
             "id": "order-bad-deployment@1",
@@ -355,10 +442,30 @@ def _store_demo_scenarios(store: InMemoryStore) -> None:
             "version": 1,
             "description": "Order Service 错误部署导致持续失败，需人工回滚",
             "category": "application",
+            "allowlisted_runbooks": ["db_rollback@1"],
         },
     ]
     for s in demo_scenarios:
         store.add_scenario(s)
+
+
+def _compute_plan_hash(
+    runbook_ref: str,
+    target: str,
+    parameters: dict,
+    incident_id: str,
+) -> str:
+    """生成与 Action Gateway 约定一致的演示计划哈希。"""
+    canonical = json.dumps(
+        {
+            "runbook_ref": runbook_ref,
+            "target": target,
+            "parameters": parameters,
+            "incident_id": incident_id,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 store = InMemoryStore()
@@ -553,14 +660,116 @@ async def run_scenario(scenario_id: str):
     scenario = store._scenarios.get(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"场景 {scenario_id} 不存在")
-    # 模拟：创建一个事故来关联
-    from uuid import uuid4
-    incident_id = str(uuid4())
+
+    service_target = next(
+        (
+            service
+            for service in ("payment", "inventory", "order")
+            if service in scenario_id
+        ),
+        "order",
+    )
+    target = f"{service_target}-api"
+    severity = (
+        IncidentSeverity.CRITICAL
+        if scenario["category"] in {"database", "kubernetes", "resource"}
+        else IncidentSeverity.WARNING
+    )
+    incident = store.create_incident(
+        IncidentCreate(
+            alert_source=AlertSource(
+                alertmanager_id=f"scenario:{scenario_id}",
+                fingerprint=f"exercise:{uuid4()}",
+                alert_name=f"{target} / {scenario['name']}",
+                severity=severity,
+                description=scenario["description"],
+                started_at=datetime.now(),
+            )
+        )
+    )
+    store.add_timeline_event(
+        incident.id,
+        "scenario.started",
+        "scenario_runner",
+        {"scenario_id": scenario_id, "profile": "light", "target": target},
+    )
+    store.set_status(incident, IncidentStatus.TRIAGING, "故障注入已确认")
+    store.set_status(incident, IncidentStatus.DIAGNOSING, "Agent 开始关联诊断信号")
+
+    evidence = scenario.get("expected_evidence") or [
+        f"Prometheus: {target} 指标偏离基线",
+        f"Loki: {target} 故障日志已归档",
+        f"Tempo: {target} 依赖调用链异常",
+    ]
+    for index, summary in enumerate(evidence, start=1):
+        store.add_timeline_event(
+            incident.id,
+            "evidence.collected",
+            "diagnostic_gateway",
+            {
+                "source": ["prometheus", "loki", "tempo"][index % 3],
+                "summary": summary,
+                "evidence_id": f"ev-{incident.id[:8]}-{index}",
+            },
+        )
+    store.add_timeline_event(
+        incident.id,
+        "hypothesis.generated",
+        "investigator_fixture",
+        {
+            "statement": scenario["name"] + " 与目标服务异常信号一致",
+            "confidence": 0.88,
+            "category": scenario["category"],
+            "affected_service": target,
+            "supporting_evidence": len(evidence),
+            "opposing_evidence": "payment-api / PostgreSQL 基线正常",
+        },
+    )
+
+    allowed_runbooks = scenario.get("allowlisted_runbooks", [])
+    runbook_ref = allowed_runbooks[0] if allowed_runbooks else "no_op"
+    store.set_status(incident, IncidentStatus.PLAN_PROPOSED, "形成受限恢复方案")
+    if runbook_ref == "db_rollback@1":
+        store.set_status(incident, IncidentStatus.ESCALATED, "R2 回滚在 MVP 中禁用")
+        store.add_timeline_event(
+            incident.id,
+            "incident.escalated",
+            "policy_gate",
+            {"reason": "R2 操作在 MVP 中禁用", "runbook_ref": runbook_ref},
+        )
+    elif runbook_ref == "no_op":
+        store.set_status(incident, IncidentStatus.VERIFYING, "观察自动恢复")
+        store.add_timeline_event(
+            incident.id,
+            "recovery.verified",
+            "verification_fixture",
+            {"result": "passed", "action": "none", "window_seconds": 60},
+        )
+        store.set_status(incident, IncidentStatus.RESOLVED, "自动恢复验证通过")
+        incident.resolved_at = datetime.now()
+    else:
+        parameters = {"reason": f"修复 {scenario_id} 的演练故障"}
+        if runbook_ref == "scale_deployment@1":
+            parameters["replicas"] = 4
+        store.set_status(incident, IncidentStatus.AWAITING_APPROVAL, "等待人工批准 R1 动作")
+        store.create_approval(
+            incident.id,
+            ApprovalRequest(
+                plan_id=f"plan-{incident.id[:8]}",
+                runbook_ref=runbook_ref,
+                target=target,
+                parameters=parameters,
+                risk_level=RiskLevel.R1,
+                plan_hash=_compute_plan_hash(runbook_ref, target, parameters, incident.id),
+                hypothesis_id=f"hyp-{incident.id[:8]}",
+            ),
+        )
+
     return {
         "exercise_id": str(uuid4()),
         "scenario_id": scenario_id,
-        "incident_id": incident_id,
-        "status": "injecting",
+        "incident_id": incident.id,
+        "status": incident.status.value,
         "message": f"场景 {scenario_id} 已启动",
     }
 
@@ -697,15 +906,82 @@ async def seed_demo_data():
             if target_status == IncidentStatus.RESOLVED:
                 incident.resolved_at = datetime.now()
 
-        # 添加一些模拟证据和时间线事件
-        store._add_timeline_event(
-            incident, "evidence.collected", "diagnostic_gateway",
-            {"source": "prometheus", "summary": f"{demo['alert_source'].alert_name} 指标异常"},
+        # 添加可读的证据、假设和演示审批，确保首屏可以完整回放调查链路。
+        affected_service = (
+            "payment-api"
+            if "Payment" in demo["alert_source"].alert_name
+            else "inventory-api"
         )
+        evidence_payloads = [
+            {
+                "source": "prometheus",
+                "summary": f"{demo['alert_source'].alert_name} 指标异常",
+                "evidence_id": f"ev-{incident.id[:8]}-metrics",
+            },
+            {
+                "source": "loki",
+                "summary": f"{affected_service} 日志出现连续超时或错误",
+                "evidence_id": f"ev-{incident.id[:8]}-logs",
+            },
+            {
+                "source": "tempo",
+                "summary": "跨服务 Trace 将慢点收敛到同一依赖调用",
+                "evidence_id": f"ev-{incident.id[:8]}-trace",
+            },
+        ]
+        for payload in evidence_payloads:
+            store._add_timeline_event(incident, "evidence.collected", "diagnostic_gateway", payload)
         store._add_timeline_event(
-            incident, "hypothesis.generated", "investigator",
-            {"confidence": 0.75, "category": random.choice(["network", "application", "database"])},
+            incident,
+            "hypothesis.generated",
+            "investigator_fixture",
+            {
+                "statement": f"{affected_service} 的依赖调用异常是当前事故的主要根因",
+                "confidence": 0.86,
+                "category": random.choice(["network", "application", "database"]),
+                "affected_service": affected_service,
+                "supporting_evidence": [p["evidence_id"] for p in evidence_payloads],
+                "opposing_evidence": "其他业务服务基线正常",
+            },
         )
+
+        if incident.status == IncidentStatus.AWAITING_APPROVAL:
+            target = "payment-api"
+            runbook_ref = "restart_deployment@1"
+            parameters = {"reason": "清除演练故障并验证恢复"}
+            approval = store.create_approval(
+                incident.id,
+                ApprovalRequest(
+                    plan_id=f"plan-{incident.id[:8]}",
+                    runbook_ref=runbook_ref,
+                    target=target,
+                    parameters=parameters,
+                    risk_level=RiskLevel.R1,
+                    plan_hash=_compute_plan_hash(runbook_ref, target, parameters, incident.id),
+                    hypothesis_id=f"hyp-{incident.id[:8]}",
+                ),
+            )
+        elif incident.status == IncidentStatus.RESOLVED:
+            target = "inventory-api"
+            runbook_ref = "scale_deployment@1"
+            parameters = {"replicas": 4, "reason": "验证扩容后的恢复窗口"}
+            approval = store.create_approval(
+                incident.id,
+                ApprovalRequest(
+                    plan_id=f"plan-{incident.id[:8]}",
+                    runbook_ref=runbook_ref,
+                    target=target,
+                    parameters=parameters,
+                    risk_level=RiskLevel.R1,
+                    plan_hash=_compute_plan_hash(runbook_ref, target, parameters, incident.id),
+                    hypothesis_id=f"hyp-{incident.id[:8]}",
+                ),
+            )
+            store.decide_approval(
+                approval["id"],
+                ApprovalDecision(approved=True, reason="演示数据中的已验证恢复"),
+                decided_by="demo-operator",
+            )
 
         created.append(incident.id)
 

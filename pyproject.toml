@@ -27,8 +27,7 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 
-# Dependencies will be locked after M0 spike validation.
-# All are proposed and subject to change based on M0 evidence.
+# Root metadata is intentionally small; package-specific dependencies live under apps/ and packages/.
 
 [project.optional-dependencies]
 dev = [
@@ -37,11 +36,27 @@ dev = [
     "mypy",
 ]
 
-[project.scripts]
-sentinel-doctor = "sentinel_x.cli:doctor"
-
 [tool.ruff]
 line-length = 100
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+    "packages/domain/tests",
+    "packages/diagnostics/tests",
+    "apps/control-api/tests",
+    "apps/action-gateway/tests",
+    "apps/incident-worker/tests",
+    "demo/services/tests",
+]
+addopts = "--import-mode=importlib --asyncio-mode=auto"
+pythonpath = [
+    "packages/contracts/src",
+    "packages/domain/src",
+    "packages/policy/src",
+    "packages/diagnostics/src",
+    "apps/control-api/src",
+    "apps/action-gateway/src",
+    "apps/incident-worker/src",
+    "demo/services/src",
+    "evals/src",
+]

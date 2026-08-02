@@ -41,26 +41,11 @@ async def process_payment(payment: PaymentCreate, request: Request):
     """处理支付。"""
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
 
-    fault_error = fault_config.apply()
+    fault_error = await fault_config.apply_async()
     if fault_error:
         raise HTTPException(status_code=503, detail=f"[payment-api] {fault_error}")
 
     payment_id = f"PAY-{uuid.uuid4().hex[:8].upper()}"
-
-    # 模拟支付处理（可能偶发失败）
-    import random
-    if random.random() < 0.02:  # 2% 基础失败率
-        payments[payment_id] = {
-            "payment_id": payment_id,
-            "order_id": payment.order_id,
-            "amount": payment.amount,
-            "status": "failed",
-        }
-        return service_response(
-            "payment-api",
-            {"payment_id": payment_id, "status": "failed", "reason": "支付网关异常"},
-            request_id=request_id,
-        )
 
     payments[payment_id] = {
         "payment_id": payment_id,

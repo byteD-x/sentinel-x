@@ -12,24 +12,31 @@
 - `M` Measured：固定数据集/环境报告，含样本、版本和限制。
 - `P` Published：脱敏证据包和公开链接可复查。
 
-当前全部只达到 `D`；仓库没有业务代码、Git commit 或实测报告。
+当前为混合等级：部分 light/prototype 能力已达到 `I` 或局部 `T`，但尚无 `M/P` 级证据。任何 `T` 级结论只覆盖对应命令和本地环境，不代表 full profile、生产安全或固定 benchmark 已完成。
+
+当前主要证据：
+
+- 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
+- 本地门禁：`python -m pytest -q --tb=short --asyncio-mode=auto`，结果为 67 passed。
+- 前端构建：`npm run build`（目录 `apps/web-console`）通过。
+- 限制：完整 Python 门禁、Temporal Server replay、PostgreSQL migration、full Kubernetes/observability E2E、数据库绑定审批授权和固定评测仍未完成。
 
 ## 2. Claim 台账
 
 | ID | 可对外声明主题 | 当前 | 当前可用表述 | 升级所需证据 |
 | --- | --- | --- | --- | --- |
-| CLM-01 | 持久化事故工作流 | D | “设计了 Temporal 持久工作流与重放/审批语义” | Worker restart/replay 测试、history refs、commit |
+| CLM-01 | 持久化事故工作流 | I/T(partial) | “实现了可测试的 Python Workflow fixture 与状态机；Temporal 持久 replay 仍未验证” | Temporal Server replay、Worker restart、history refs、原始日志 |
 | CLM-02 | 跨指标/日志/Trace/K8s 调查 | D | “定义了四类受限诊断工具与 Evidence 引用协议” | full E2E、工具审计、Top-1 report |
 | CLM-03 | 根因 Top-1 | D | “建立了 Top-1 与 B0/B1/C1 评测协议” | holdout dataset、样本数、模型/版本、原始报告 |
-| CLM-04 | 安全审批与受控动作 | D | “设计了 R0–R3、不可变审批和独立 Gateway 边界” | 合法/非法 R1、篡改/重放/并发测试 |
+| CLM-04 | 安全审批与受控动作 | I/T(partial) | “实现了 prototype Action Gateway 的 Runbook/目标/参数/hash/过期/幂等/kill switch 校验；数据库绑定审批授权未完成” | DB 绑定 approval、TokenReview、消费次数、目标漂移、并发/重放测试 |
 | CLM-05 | 零重复副作用 | D | 不能声明已达到 | submit timeout/Worker restart/并发报告 effect=0 |
 | CLM-06 | 固定攻击集拦截 | D | “定义了提示注入与越权攻击集” | 样本数、拒绝码、合法接受率、安全报告 |
 | CLM-07 | 自动/受控恢复 | D | “设计了自动恢复、restart、scale 三种可区分路径” | 因果对照、SLO observed window、recovery_actor |
-| CLM-08 | 可审计事故回放 | D | “定义了只追加时间线和 SSE 重连协议” | refresh/reconnect/export E2E、事故包 hash |
+| CLM-08 | 可审计事故回放 | I(partial) | “实现了 light API 时间线、SSE 推送和前端去重展示；断点续传/导出包未完成” | refresh/reconnect/export E2E、事故包 hash |
 | CLM-09 | 本地 Kubernetes 最小权限 | D | “规划了 namespace/RBAC/NetworkPolicy 权限矩阵” | manifests、can-i/API 负向测试、镜像 digest |
 | CLM-10 | 成本与资源治理 | D | “定义了 Token、查询和资源预算口径” | 每事故 Token/费用、CPU/内存/启动时间报告 |
 | CLM-11 | 本地可复现 | D | “提供了 full/light 生命周期和验收设计” | 第二台干净环境 cold run、实际命令/时长 |
-| CLM-12 | UI 指挥与审批体验 | D | “完成了指挥台信息架构和安全审批交互规格” | 4 视口截图、无障碍/并发/权限测试 |
+| CLM-12 | UI 指挥与审批体验 | I/T(partial) | “实现了 React 控制台、事故列表、详情、审批确认和演练列表；已通过本地构建” | 4 视口截图、无障碍/并发/权限测试 |
 
 ## 3. 禁止的提前表述
 

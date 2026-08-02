@@ -1,69 +1,190 @@
 # Sentinel-X
 
-> AI 事故指挥中心：在隔离的演练环境中，让 AI 像值班工程师一样收集证据、提出根因假设和恢复方案，但任何有影响的动作都必须经过策略校验与人工审批。
+Sentinel-X 是一个面向隔离演练环境的 AI 事故指挥平台原型。它把异常发现、证据收集、根因假设、人工审批、受控恢复和事故回放组织成一条可审计的工作流。
 
-## 当前状态
+它不是普通聊天机器人，也不允许模型获得任意 Shell、`kubectl` 或生产集群写权限。
 
-**阶段：D0 完整开发前设计基线。** 当前仓库包含产品、架构、场景、Runbook、API、数据、Workflow、LLM/工具、UX、安全、测试、部署、运维、Backlog、风险、ADR 和发布资料，但没有可运行业务代码、构建产物、Git commit 或实测指标。文中技术栈均为拟议方案，指标均为目标值或待测项。
+> 当前状态：`D1-light` 本地原型。Control API、Action Gateway、Incident Worker、诊断工具、演练微服务和 React 控制台已经可以本地运行；完整 Kubernetes、Temporal Server replay、PostgreSQL 持久投影、全量 OpenTelemetry 和固定 benchmark 仍未完成。
 
-## 它要解决什么问题
+## 30 秒演示
 
-线上故障发生后，工程师通常需要在告警、指标、日志、Trace 和 Kubernetes 状态之间来回切换。Sentinel-X 把这段过程组织成一条可回放的事故工作流：
+1. 打开事故指挥室，载入 4 条演示事故。
+2. 进入“演练场景”，启动一个固定故障。
+3. 在事故详情中查看 Prometheus、Loki、Tempo 风格的证据、根因假设和调查时间线。
+4. 检查 R1 Runbook 的目标、参数、风险等级、过期时间和 plan hash。
+5. 人工批准后，light fixture 会写入执行、恢复验证和回放事件。
+
+核心链路：
 
 ```text
-发现异常 -> 收集证据 -> 推断根因 -> 提出方案 -> 人工审批 -> 受控执行 -> 验证恢复 -> 复盘评测
+异常信号 -> 证据关联 -> 根因假设 -> 恢复方案 -> 人工审批
+    -> 受控执行 -> 恢复验证 -> 事故回放与评测
 ```
 
-重点不是“让模型随意操作服务器”，而是展示一套可解释、可恢复、可审计的 AI 工程系统。
+## 为什么做这个项目
 
-## MVP 预期
+真实故障处理经常需要在告警、指标、日志、Trace、服务状态和发布记录之间来回切换。Sentinel-X 用固定故障和可引用证据展示一种更可解释的 Agent 工程模式：AI 负责调查和提出计划，人负责授权有影响的动作，系统记录每一步为什么发生。
 
-- 在订单、库存、支付组成的微型商城中注入 6 类固定故障。
-- 关联 Prometheus 指标、Loki 日志、Tempo Trace 和 Kubernetes 只读状态。
-- 输出带证据引用的根因假设，而不是只给一段自然语言答案。
-- 使用持久工作流处理重试、超时、暂停审批和进程重启恢复。
-- 只执行预先登记、参数受限、可幂等的 Runbook。
-- 对根因命中、诊断和恢复耗时、安全拦截及模型成本做可复现评测。
-- 在时间线中回放每个参与者、证据、决策和动作。
+## 主要能力
+
+| 能力 | 当前 light 原型 | 说明 |
+| --- | --- | --- |
+| 事故指挥室 | 已实现 | 事故队列、服务拓扑、状态摘要、待审批提示 |
+| 事故详情 | 已实现 | 证据、根因假设、审批记录、SSE 时间线和恢复事件 |
+| 故障演练目录 | 已实现 | 6 个固定场景，启动后创建可回放事故 |
+| 诊断工具边界 | 已实现并测试 | Prometheus、Loki、Tempo、Kubernetes 只读工具的参数约束 |
+| 人工审批 | 已实现并测试 | R1 计划展示、确认弹层、审批后 light-fixture 恢复链路 |
+| Action Gateway | 原型已实现 | Runbook 白名单、参数校验、plan hash、过期和幂等校验 |
+| 固定评测 | 设计中 | 评测 runner 和指标定义存在，完整 benchmark 尚未发布 |
+| Kubernetes / OTel 全栈 | proposed | 清单和架构草案存在，尚未作为完成能力声明 |
+
+## 架构概览
+
+```mermaid
+flowchart LR
+    UI[React Web Console] --> API[Control API]
+    API --> WF[Incident Worker]
+    WF --> DG[Diagnostic Gateway]
+    WF --> AG[Action Gateway]
+    AG --> POLICY[Runbook + Policy Gate]
+    API --> STORE[(Light in-memory store)]
+    SCENARIO[Scenario Catalog] --> API
+    DEMO[Order / Inventory / Payment] --> SIGNALS[Metrics / Logs / Traces]
+    SIGNALS --> DG
+```
+
+目标架构会把内存存储替换为 PostgreSQL，把异步 fixture 收敛到 Temporal，并在隔离 Kubernetes 集群中接入真实的观测查询和受限执行器。目标架构不等于当前已完成能力。
+
+## 快速开始
+
+### 环境
+
+- Python `>= 3.13`
+- Node.js 和 npm
+- Git
+- Docker Desktop、k3d/kind 只在尝试 full profile 时需要
+
+### 安装
+
+在仓库根目录执行：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e packages/contracts -e packages/domain -e packages/diagnostics -e packages/policy
+python -m pip install -e apps/control-api -e apps/incident-worker -e apps/action-gateway
+python -m pip install -e demo/services
+Set-Location apps/web-console
+npm ci
+```
+
+### 启动控制面和控制台
+
+打开两个终端。
+
+终端一：
+
+```powershell
+python -m uvicorn sentinel_x_control_api.app:app --host 127.0.0.1 --port 8000
+```
+
+终端二：
+
+```powershell
+Set-Location apps/web-console
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+浏览器打开 <http://127.0.0.1:5173>。
+
+控制台通过 Vite proxy 访问 `http://127.0.0.1:8000`。如果端口被占用，请先停止占用项目端口的进程，再按文档启动，避免把未知服务误当成演练环境。
+
+## 验证
+
+根目录快速测试：
+
+```powershell
+python -m pytest -v --tb=short --asyncio-mode=auto
+```
+
+前端类型检查和生产构建：
+
+```powershell
+Set-Location apps/web-console
+npm run build
+```
+
+Action Gateway 和诊断边界测试：
+
+```powershell
+python -m pytest apps/action-gateway/tests packages/diagnostics/tests -v --tb=short --asyncio-mode=auto
+```
+
+演练微服务测试会启动本地端口 `8082`、`8083`、`8084`，建议单独执行：
+
+```powershell
+python -m pytest demo/services/tests/test_services.py -v --tb=short --asyncio-mode=auto
+```
+
+测试通过只代表对应命令覆盖的范围，不代表完整 Kubernetes/Temporal/观测栈端到端验收已经完成。
 
 ## 安全边界
 
-- 仅连接本地隔离演练环境，不连接真实生产系统。
-- 诊断默认只读；遥测和工具返回值一律视为不可信输入。
-- 模型不能使用任意 Shell、`kubectl`、`pods/exec`、Secrets 或集群管理员权限。
-- MVP 只开放两种 R1 可逆动作：限定目标的 Deployment 重启和限定范围扩容，且必须人工审批。
-- 数据库变更、跨服务变更和任意代码执行在 MVP 中禁用。
+- 只面向本地隔离演练环境，不连接真实生产系统、生产告警或生产数据。
+- 诊断默认只读；日志、Trace、告警和工具结果都被视为不可信输入。
+- 禁止任意 Shell、`kubectl`、`pods/exec`、Secrets 读取、`cluster-admin` 和跨 namespace 写操作。
+- MVP 的 R1 动作只有登记过的 Deployment 重启和限定范围扩容，并且必须人工批准。
+- R2 数据库/跨服务高风险动作在 MVP 中禁用，R3 永久禁止。
+- Action Gateway 不持有模型密钥，模型组件不持有执行器写权限。
 
-## 拟议技术方案
+## 项目结构
 
-| 领域 | 方案 | 当前状态 |
-| --- | --- | --- |
-| 控制台 | React + TypeScript | proposed |
-| 控制 API | FastAPI + Pydantic | proposed |
-| 持久工作流 | Temporal | proposed |
-| 领域存储 | PostgreSQL + SQLAlchemy + Alembic | proposed |
-| 可观测性 | OpenTelemetry + Prometheus + Loki + Tempo + Grafana | proposed |
-| 演练环境 | Kubernetes（k3d 或 kind） | proposed，待基准验证 |
-| 故障注入 | 应用故障开关 + Toxiproxy + 受控 Kubernetes 操作 | proposed |
-| 模型接入 | OpenAI-compatible provider | proposed |
+```text
+apps/
+  control-api/       事故、场景、审批和 SSE API
+  action-gateway/    独立动作门控与 Runbook 执行器
+  incident-worker/   可测试的事故 Workflow fixture
+  web-console/       React + TypeScript 控制台
+demo/
+  services/          order / inventory / payment 演练服务
+  scenarios/         固定故障 YAML 与场景加载器
+packages/
+  contracts/         Pydantic 契约
+  domain/            事故状态机和领域服务
+  diagnostics/       只读诊断工具定义与结果脱敏
+  policy/             风险等级和策略校验
+docs/                 产品、架构、安全、测试、运维和发布文档
+evals/                固定评测 runner 与指标定义
+infra/                Kubernetes、OTel、Prometheus 等清单草案
+```
 
 ## 文档入口
 
-- [完整文档地图与阅读顺序](docs/README.md)
+- [文档地图与阅读顺序](docs/README.md)
 - [产品需求与验收](docs/product-requirements.md)
-- [拟议系统架构](docs/architecture.md)
-- [领域模型与接口契约](docs/domain-model-and-contracts.md)
-- [安全与威胁模型](docs/security-model.md)
+- [系统架构](docs/architecture.md)
+- [API 契约](docs/api-contracts.md)
+- [安全模型](docs/security-model.md)
+- [场景目录](docs/scenario-catalog.md)
 - [测试与评测设计](docs/testing-and-evaluation.md)
-- [开发路线与环境准备](docs/development-plan.md)
+- [本地开发与部署](docs/local-development-and-deployment.md)
 - [10 分钟演示手册](docs/demo-runbook.md)
-- [工程 Backlog](docs/engineering-backlog.md)
-- [需求追踪矩阵](docs/requirements-traceability.md)
-- [风险与发布门禁](docs/risk-register.md)
-- [简历证据账本](docs/evidence-ledger.md)
+- [发布门禁](docs/release-readiness.md)
+- [证据账本](docs/evidence-ledger.md)
 - [贡献指南](CONTRIBUTING.md)
-- [Agent 协作规范](AGENTS.md)
+- [安全问题报告](SECURITY.md)
 
-## 开始实现前
+## Roadmap
 
-先完成 [开发路线](docs/development-plan.md) 中的 M0 决策和本机资源基准，再进入代码骨架阶段。任何与本文边界冲突的能力，必须先修改产品、安全和架构文档并完成评审。
+- 收敛 `/api` 与正式 `/api/v1` 契约，补齐认证、幂等、ETag 和持久投影。
+- 将审批绑定到数据库记录、目标身份、参数哈希、过期时间和一次性消费凭证。
+- 完成 Temporal Server replay、PostgreSQL migration/outbox 和 worker 重启恢复。
+- 在本地隔离 Kubernetes 中完成六场景注入、cleanup、权限负向测试和观测查询。
+- 发布带 dataset/profile/model/policy/SLO 版本的 holdout benchmark，不用演示数据替代评测。
+
+## 许可证与贡献
+
+当前仓库元数据仍标记为 `UNLICENSED`，尚未发布可复用许可证。贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) 和 [AGENTS.md](AGENTS.md)。
+
+所有对外指标、性能和安全结论都必须回链到可重复的命令、报告或 [证据账本](docs/evidence-ledger.md)，不能把设计目标写成已达成事实。

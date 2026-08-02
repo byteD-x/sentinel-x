@@ -47,9 +47,9 @@
 - `shrimp-rules.md` AI Agent 开发守则
 - `spikes/` 实验目录结构
 
-### M0-03 模型结构化输出 spike ✅
+### M0-03 模型结构化输出 spike（探索性）
 
-- qwen2.5:7b 100% 成功率（12/12）
+- qwen2.5:7b 生成 12/12 个可解析 JSON；严格 Schema 通过率未完成正式统计
 - 平均延迟 10.7s，平均 535 tokens/次
 - 发现 Schema 校验缺口：模型返回 `confidence: 85` 而非 `0.85`
 - 4 个 cloud 模型全部退役 — 需锁定模型版本策略
@@ -67,3 +67,57 @@
 - M0-04: 审批与服务身份 spike
 - M0-05: OTel 关联与资源基准
 - M0-06: 固化首批 ADR 与版本锁定
+
+## 2026-08-02（代码增强）
+
+### 新增模块
+
+#### 场景加载器 (`demo/scenarios/loader.py`)
+- 从 6 个 YAML 场景文件批量加载并解析为 Pydantic 模型
+- 支持按名称、类别查询，场景完整性校验
+- 提供 Markdown 格式场景清单输出
+- 验证通过：6/6 场景正确解析
+
+#### 诊断网关 (`packages/diagnostics/gateway.py`)
+- 提供 4 类场景感知模拟查询（网络延迟、5xx、OOM、CPU饱和）
+- 场景上下文替换模板变量，生成与故障一致的假数据
+- 调用计数追踪、参数校验、结果脱敏
+- 验证通过：正常状态和 3 种故障场景查询均正确
+
+#### LLM 客户端 (`apps/incident-worker/llm_client.py`)
+- OpenAI-compatible API 封装（支持 OpenAI、Ollama 等）
+- 结构化输出（JSON Schema 约束）、自动重试（429/5xx）
+- Token 消耗追踪、超时控制
+- 预设 Hypothesis 和 Evidence Analysis 的 Schema 定义
+- 更新 activities.py 集成真实 LLM 客户端
+
+#### Web Console 增强
+- 添加 SSE 实时更新 Hook (`useSSE`)
+- 增强 IncidentDetailPage：审批界面（批准/拒绝）、审批历史、证据摘要、假设展示
+- 完整 CSS 深色主题样式系统
+- TypeScript 编译通过，Vite 构建成功（248KB JS + 11KB CSS）
+
+### 修复
+- 修复 `sanitize_result` 正则表达式 `\1` 引用非捕获组 bug
+- 更新 pyproject.toml 添加 pytest `--import-mode=importlib` 默认配置
+
+### 测试状态
+- 核心测试：54/54 全部通过（状态机 19、API 10、Workflow 12、Gateway 13）
+- Demo 服务测试：7/8 通过（1 个偶发服务间调用连接失败，属测试环境时序问题）
+
+## 2026-08-02（审查整改）
+
+### 代码与前端修正
+
+- 根 `pytest` 默认门禁改为真实测试目录，当前 `python -m pytest -q --tb=short --asyncio-mode=auto` 为 67 passed。
+- Demo services 加入根测试路径，修复 entry points，并移除支付基础链路随机失败。
+- Action Gateway 增加审批凭证过期时间、未知字段拒绝和对应负向测试。
+- Control API 输入模型拒绝未知字段，覆盖顶层与嵌套告警字段。
+- Diagnostic Gateway 参数校验补齐 `maxLength`、`minimum`、`maximum`。
+- Web Console 增加事故状态筛选、分页、审批二次确认、SSE 去重和移动端布局修复。
+
+### 文档与证据修正
+
+- README、docs/README、AGENTS、开发计划、本地部署、UX、API 契约、发布门禁和证据账本从 D0-only 更新为 D1-light prototype 状态。
+- 明确当前 Gateway/Control API/Workflow 仍是 prototype 安全语义，数据库绑定审批、TokenReview、Temporal Server replay 和 full E2E 未完成。
+- M0 模型 spike 降级为探索性证据，不再声明严格 Schema 稳定通过或小样本 p95/p99。

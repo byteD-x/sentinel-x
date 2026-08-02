@@ -2,7 +2,15 @@
 
 ## 1. 当前基线
 
-仓库当前只有开发前文档。没有包管理器、源代码、容器、Kubernetes 清单、测试、CI 或已验证启动命令。以下目录、依赖和命令接口都是目标方案，必须在对应里程碑实现并验证后才能视为可用。
+仓库已从开发前文档基线进入 D1-light 原型建设阶段：已有 Python monorepo 包、React 控制台、演练微服务、场景 fixture、infra 草案和测试。以下路线图仍定义 full MVP 的完成顺序；已经存在的 light/prototype 代码需要继续收敛到契约、安全和证据门禁，不能因“文件存在”视为 M1–M6 完成。
+
+当前未完成的关键基线：
+
+- full Kubernetes 演练环境和本机资源基准。
+- Temporal Server replay、Worker restart 与 Signal 等待验证。
+- PostgreSQL migration、projection/outbox 和数据库绑定审批授权。
+- OpenTelemetry/Prometheus/Loki/Tempo full profile E2E。
+- 固定 benchmark、holdout 数据集和可发布证据包。
 
 ## 2. 关键假设
 

@@ -4,8 +4,8 @@
 
 | 层级 | 含义 | 当前状态 |
 | --- | --- | --- |
-| D0 Documentation Baseline | 完整设计与开发准备，无运行能力 | READY：2026-08-01 静态验收通过 |
-| D1 Developer Preview | light 可运行，核心 contracts/Workflow fixture | NOT_READY |
+| D0 Documentation Baseline | 完整设计与开发准备 | SUPERSEDED：已进入 light prototype 代码阶段 |
+| D1 Developer Preview | light 可运行，核心 contracts/Workflow fixture | PARTIAL：已有代码与局部测试；契约漂移和安全授权缺口未关闭 |
 | D2 Demo MVP | full 六场景、两 R1、UI、固定 E2E | NOT_READY |
 | D3 Evidence Release | holdout benchmark、脱敏事故包、冷启动复现 | NOT_READY |
 
@@ -41,6 +41,14 @@
 - migration、状态机、Workflow replay/restart、projection/outbox 测试通过。
 - light profile 明确禁用真实故障和 R1。
 - 最小 UI/接口显示当前 profile 和未实现能力，不伪装 full。
+
+当前阻塞：
+
+- Control API 与 API 契约仍有 `/api` vs `/api/v1`、认证/CSRF/HMAC/幂等/ETag 等差距。
+- Action Gateway 当前是 prototype gate，尚未实现 TokenReview、数据库绑定审批读取与原子消费。
+- Workflow fixture 仍包含测试型自动审批/模拟执行路径，不能作为人工审批边界完成证据。
+- Temporal Server replay、PostgreSQL migration、projection/outbox 和 full observability E2E 未完成。
+- 默认质量门禁需持续覆盖全部真实测试目录，并保留原始输出。
 
 ## 5. D2 Demo MVP 门禁
 

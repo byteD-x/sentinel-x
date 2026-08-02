@@ -2,7 +2,7 @@
 共享工具 — 故障注入、请求传播、响应格式。
 """
 
-import hashlib
+import asyncio
 import logging
 import random
 import time
@@ -57,6 +57,30 @@ class FaultConfig:
 
         if self.fault_type == FaultType.SLOW_DB:
             time.sleep(random.uniform(1.0, 3.0))
+            return None
+
+        return None
+
+    async def apply_async(self) -> Optional[str]:
+        """在 async 端点中应用故障，避免阻塞事件循环。"""
+        if not self.active:
+            return None
+
+        if self.fault_type == FaultType.LATENCY:
+            actual_latency = self.latency_ms + random.randint(0, self.latency_ms // 2)
+            await asyncio.sleep(actual_latency / 1000.0)
+            return None
+
+        if self.fault_type == FaultType.ERROR_5XX:
+            if random.random() < self.error_rate:
+                return f"模拟 5xx 错误 (rate={self.error_rate})"
+
+        if self.fault_type == FaultType.CONNECTION_TIMEOUT:
+            await asyncio.sleep(5.0)
+            return "连接超时"
+
+        if self.fault_type == FaultType.SLOW_DB:
+            await asyncio.sleep(random.uniform(1.0, 3.0))
             return None
 
         return None

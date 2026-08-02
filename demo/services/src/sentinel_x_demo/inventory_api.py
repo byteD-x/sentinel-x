@@ -44,7 +44,7 @@ async def check_inventory(check: InventoryCheck, request: Request):
     """检查库存可用性。"""
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
 
-    fault_error = fault_config.apply()
+    fault_error = await fault_config.apply_async()
     if fault_error:
         from fastapi import HTTPException
         raise HTTPException(status_code=503, detail=f"[inventory-api] {fault_error}")

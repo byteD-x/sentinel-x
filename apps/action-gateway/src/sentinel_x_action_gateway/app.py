@@ -21,16 +21,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import Optional
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger("sentinel_x_action_gateway")
 
@@ -107,7 +106,11 @@ REGISTERED_RUNBOOKS: dict[str, RunbookDefinition] = {
 # ---------------------------------------------------------------------------
 
 
-class ActionSubmitRequest(BaseModel):
+class StrictBaseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ActionSubmitRequest(StrictBaseModel):
     """动作提交请求 — 来自 Incident Worker。"""
     runbook_ref: str = Field(..., pattern=r"^[a-z_]+@\d+$")
     target: str = Field(..., min_length=1, max_length=253)
@@ -115,7 +118,8 @@ class ActionSubmitRequest(BaseModel):
     idempotency_key: str = Field(..., min_length=16)
     plan_hash: str = Field(..., min_length=16)
     approval_id: str
-    approval_token: str  # 短时审批凭证
+    approval_token: str = Field(..., min_length=16)  # 短时审批凭证
+    approval_expires_at: datetime
     incident_id: str
     audience: str = "sentinel-action-gateway"
 
@@ -269,7 +273,12 @@ class ActionGate:
                 f"期望: {expected_hash[:8]}..."
             ), None
 
-        # 7. 幂等键重复检查
+        # 7. 审批有效期检查
+        now = datetime.now(tz=req.approval_expires_at.tzinfo)
+        if req.approval_expires_at <= now:
+            return False, "审批凭证已过期", None
+
+        # 8. 幂等键重复检查
         existing = self.store.check_idempotency(req.idempotency_key)
         if existing:
             return False, (

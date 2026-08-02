@@ -17,9 +17,9 @@ dependencies = [
 dev = ["pytest", "pytest-asyncio", "httpx"]
 
 [project.scripts]
-order-api = "sentinel_x_demo.order:main"
-inventory-api = "sentinel_x_demo.inventory:main"
-payment-api = "sentinel_x_demo.payment:main"
+order-api = "sentinel_x_demo.order_api:main"
+inventory-api = "sentinel_x_demo.inventory_api:main"
+payment-api = "sentinel_x_demo.payment_api:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sentinel_x_demo"]

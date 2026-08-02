@@ -170,10 +170,18 @@ def validate_tool_params(tool: ToolDefinition, params: dict) -> list[str]:
         prop = properties[key]
         if prop.get("type") == "string" and not isinstance(value, str):
             errors.append(f"参数 {key} 应为字符串")
+            continue
         if prop.get("type") == "integer" and not isinstance(value, int):
             errors.append(f"参数 {key} 应为整数")
+            continue
         if "enum" in prop and value not in prop["enum"]:
             errors.append(f"参数 {key} 值 {value} 不在允许范围: {prop['enum']}")
+        if isinstance(value, str) and "maxLength" in prop and len(value) > prop["maxLength"]:
+            errors.append(f"参数 {key} 长度超过上限 {prop['maxLength']}")
+        if isinstance(value, int) and "minimum" in prop and value < prop["minimum"]:
+            errors.append(f"参数 {key} 小于最小值 {prop['minimum']}")
+        if isinstance(value, int) and "maximum" in prop and value > prop["maximum"]:
+            errors.append(f"参数 {key} 大于最大值 {prop['maximum']}")
 
     return errors
 
@@ -208,7 +216,21 @@ def sanitize_result(raw: str, max_bytes: int = 100 * 1024) -> tuple[str, bool]:
     # 移除常见的 Token 模式
     raw = re.sub(r'(?:sk-|eyJ|ghp_|xox[baprs]-)[a-zA-Z0-9_-]{20,}', '[REDACTED]', raw)
     # 移除 API Key 模式
-    raw = re.sub(r'(?:api[_-]?key|apikey|token|secret|password)\s*[:=]\s*\S+',
-                 r'\1: [REDACTED]', raw, flags=re.IGNORECASE)
+    raw = re.sub(
+        r'(api[_-]?key|apikey|token|secret|password)\s*[:=]\s*\S+',
+        r'\1: [REDACTED]', raw, flags=re.IGNORECASE,
+    )
 
     return raw, truncated
+
+
+# 延迟导入以避免循环依赖（gateway 依赖本模块的 DiagnosticResult 等）
+def __getattr__(name: str):
+    if name in ("DiagnosticGateway", "ScenarioContext", "SCENARIO_RESPONSES"):
+        from sentinel_x_diagnostics.gateway import (
+            DiagnosticGateway,
+            ScenarioContext,
+            SCENARIO_RESPONSES,
+        )
+        return locals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
