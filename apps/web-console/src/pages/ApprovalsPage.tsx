@@ -42,6 +42,12 @@ const STATUS_LABELS: Record<string, string> = {
   expired: '已过期',
 }
 
+const INCIDENT_STATUS_LABELS: Record<string, string> = {
+  DETECTED: '已发现', TRIAGING: '分诊中', DIAGNOSING: '调查中', PLAN_PROPOSED: '方案待审',
+  AWAITING_APPROVAL: '等待审批', EXECUTING: '执行中', VERIFYING: '验证中', RESOLVED: '已恢复',
+  ESCALATED: '已升级', FAILED: '失败',
+}
+
 const STATUS_CLASS: Record<string, string> = {
   pending: styles.pending,
   approved: styles.approved,
@@ -96,9 +102,9 @@ export function ApprovalsPage() {
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <div className={styles.eyebrow}><ClipboardCheck size={14} aria-hidden="true" /> APPROVAL QUEUE / R1 GATED</div>
+          <div className={styles.eyebrow}><ClipboardCheck size={14} aria-hidden="true" /> 待处理审批 / 恢复动作</div>
           <h1 className={styles.title}>审批队列</h1>
-          <p className={styles.subtitle}>只显示已登记的 R1 恢复计划。批准或拒绝前，必须在事故详情中核对目标、参数、证据和计划哈希。当前角色：{role}。</p>
+          <p className={styles.subtitle}>这里列出需要人工确认的恢复动作。决定前，请先打开事故详情，核对影响、证据和执行目标。当前角色：{role === 'approver' ? '审批人' : '只读观察员'}。</p>
         </div>
         <button className={styles.refreshButton} type="button" onClick={fetchApprovals} disabled={loading} title="刷新审批队列">
           <RefreshCw size={15} className={loading ? styles.spin : ''} aria-hidden="true" />
@@ -111,7 +117,7 @@ export function ApprovalsPage() {
           <span className={styles.summaryIcon}><ShieldCheck size={17} aria-hidden="true" /></span>
           <div>
             <strong>{statusFilter === 'pending' ? `${items.length} 项等待人工判断` : `${items.length} 条审批记录`}</strong>
-            <span>{statusFilter === 'pending' ? 'Action Gateway 仍处于审批门控之后' : '记录由 Control API 只读投影提供'}</span>
+          <span>{statusFilter === 'pending' ? '恢复动作会在审批后才会执行' : '这里只展示已经留下记录的决定'}</span>
           </div>
         </div>
         <div className={styles.filters} aria-label="审批状态筛选">
@@ -159,7 +165,7 @@ export function ApprovalsPage() {
                 <div className={styles.targetLine}>
                   <span>目标</span>
                   <strong>{item.target}</strong>
-                  <span className={styles.risk}>{item.risk_level} / 可逆动作</span>
+                  <span className={styles.risk}>可逆恢复动作</span>
                 </div>
                 <Link className={styles.incidentLink} to={`/incidents/${item.incident_id}`}>
                   {item.incident.alert_name}
@@ -167,7 +173,7 @@ export function ApprovalsPage() {
                 </Link>
               </div>
               <div className={styles.approvalMeta}>
-                <div><span>事故状态</span><strong>{item.incident.status}</strong></div>
+                <div><span>事故状态</span><strong>{INCIDENT_STATUS_LABELS[item.incident.status] || item.incident.status}</strong></div>
                 <div><span>计划哈希</span><code>{item.plan_hash.slice(0, 16)}…</code></div>
                 <div><span>请求时间</span><time dateTime={item.created_at}>{formatDate(item.created_at)}</time></div>
                 <Link className={styles.detailButton} to={`/incidents/${item.incident_id}`}>

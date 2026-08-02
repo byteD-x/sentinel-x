@@ -1,21 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Activity, AlertTriangle, ArrowRight, CheckCircle2, ClipboardCheck, LoaderCircle, PlayCircle, RefreshCw, Search, ShieldCheck, Timer } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
-import {
-  Activity,
-  AlertTriangle,
-  ArrowUpRight,
-  CheckCircle2,
-  ChevronRight,
-  CircleDot,
-  Database,
-  GitBranch,
-  LoaderCircle,
-  RefreshCw,
-  Server,
-  ShieldCheck,
-  TimerReset,
-  Zap,
-} from 'lucide-react'
 import { apiFetch } from '../lib/api'
 import styles from './DashboardPage.module.css'
 
@@ -31,69 +16,43 @@ interface Incident {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  DETECTED: '已发现',
-  TRIAGING: '分诊中',
-  DIAGNOSING: '调查中',
-  PLAN_PROPOSED: '方案待审',
-  AWAITING_APPROVAL: '等待审批',
-  EXECUTING: '执行中',
-  VERIFYING: '验证中',
-  RESOLVED: '已恢复',
-  ESCALATED: '已升级',
-  FAILED: '失败',
+  DETECTED: '已发现', TRIAGING: '分诊中', DIAGNOSING: '调查中', PLAN_PROPOSED: '方案待审',
+  AWAITING_APPROVAL: '等待审批', EXECUTING: '执行中', VERIFYING: '验证中', RESOLVED: '已恢复',
+  ESCALATED: '已升级', FAILED: '失败',
 }
 
 const STATUS_CLASS: Record<string, string> = {
-  DETECTED: styles.statusInfo,
-  TRIAGING: styles.statusWorking,
-  DIAGNOSING: styles.statusWorking,
-  PLAN_PROPOSED: styles.statusWorking,
-  AWAITING_APPROVAL: styles.statusPending,
-  EXECUTING: styles.statusWorking,
-  VERIFYING: styles.statusWorking,
-  RESOLVED: styles.statusResolved,
-  ESCALATED: styles.statusEscalated,
+  DETECTED: styles.statusInfo, TRIAGING: styles.statusWorking, DIAGNOSING: styles.statusWorking,
+  PLAN_PROPOSED: styles.statusWorking, AWAITING_APPROVAL: styles.statusPending, EXECUTING: styles.statusWorking,
+  VERIFYING: styles.statusWorking, RESOLVED: styles.statusResolved, ESCALATED: styles.statusEscalated,
   FAILED: styles.statusFailed,
 }
 
-const SEVERITY_CLASS: Record<string, string> = {
-  critical: styles.severityCritical,
-  warning: styles.severityWarning,
-  info: styles.severityInfo,
-}
-
+const SEVERITY_LABELS: Record<string, string> = { critical: '严重', warning: '警告', info: '提示' }
+const SEVERITY_CLASS: Record<string, string> = { critical: styles.severityCritical, warning: styles.severityWarning, info: styles.severityInfo }
 const STATUS_FILTERS = [
-  { value: 'all', label: '全部' },
-  { value: 'AWAITING_APPROVAL', label: '待审批' },
-  { value: 'DIAGNOSING', label: '调查中' },
-  { value: 'RESOLVED', label: '已恢复' },
-  { value: 'ESCALATED', label: '已升级' },
+  { value: 'all', label: '全部' }, { value: 'AWAITING_APPROVAL', label: '待审批' },
+  { value: 'DIAGNOSING', label: '调查中' }, { value: 'RESOLVED', label: '已恢复' }, { value: 'ESCALATED', label: '已升级' },
 ]
 
-interface ServiceNodeProps {
-  name: string
-  role: string
-  metric: string
-  detail: string
-  tone: 'healthy' | 'watch' | 'degraded' | 'unknown'
-  icon: typeof Server
+const FLOW_STEPS = [
+  { key: 'detect', label: '发现', icon: AlertTriangle },
+  { key: 'investigate', label: '调查', icon: Search },
+  { key: 'approve', label: '审批', icon: ClipboardCheck },
+  { key: 'execute', label: '执行', icon: PlayCircle },
+  { key: 'verify', label: '验证', icon: ShieldCheck },
+]
+
+function stepIndex(status: string) {
+  if (status === 'DETECTED') return 0
+  if (['TRIAGING', 'DIAGNOSING'].includes(status)) return 1
+  if (['PLAN_PROPOSED', 'AWAITING_APPROVAL'].includes(status)) return 2
+  if (status === 'EXECUTING') return 3
+  return 4
 }
 
-function ServiceNode({ name, role, metric, detail, tone, icon: Icon }: ServiceNodeProps) {
-  return (
-    <div className={`${styles.serviceNode} ${styles[`node_${tone}`]}`}>
-      <div className={styles.nodeTopline}>
-        <span className={styles.nodeIcon}><Icon size={16} aria-hidden="true" /></span>
-        <span className={styles.nodeStatus}><CircleDot size={10} fill="currentColor" aria-hidden="true" /> {tone === 'healthy' ? 'healthy' : tone === 'watch' ? 'watch' : tone === 'degraded' ? 'degraded' : 'unknown'}</span>
-      </div>
-      <strong>{name}</strong>
-      <span className={styles.nodeRole}>{role}</span>
-      <div className={styles.nodeMetric}>
-        <b>{metric}</b>
-        <span>{detail}</span>
-      </div>
-    </div>
-  )
+function formatTime(value: string) {
+  return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
 export function DashboardPage() {
@@ -112,13 +71,13 @@ export function DashboardPage() {
       const params = new URLSearchParams({ limit: '20' })
       if (statusFilter !== 'all') params.set('status', statusFilter)
       if (cursor) params.set('cursor', cursor)
-      const res = await apiFetch(`/api/incidents?${params.toString()}`)
-      const data = await res.json()
+      const response = await apiFetch(`/api/incidents?${params.toString()}`)
+      const data = await response.json()
       setIncidents(data.items || [])
       setNextCursor(data.next_cursor || null)
       setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载失败')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '加载事故失败')
     } finally {
       setLoading(false)
     }
@@ -126,25 +85,18 @@ export function DashboardPage() {
 
   useEffect(() => { fetchIncidents() }, [fetchIncidents])
 
+  const activeIncidents = useMemo(() => incidents.filter(item => !['RESOLVED', 'ESCALATED', 'FAILED'].includes(item.status)), [incidents])
+  const pendingApproval = useMemo(() => incidents.find(item => item.status === 'AWAITING_APPROVAL'), [incidents])
+  const priorityIncident = pendingApproval || [...activeIncidents].sort((a, b) => (a.severity === 'critical' ? -1 : 1) - (b.severity === 'critical' ? -1 : 1))[0]
+  const resolvedCount = incidents.filter(item => item.status === 'RESOLVED').length
+  const criticalCount = incidents.filter(item => item.severity === 'critical').length
+  const approvalCount = incidents.filter(item => item.status === 'AWAITING_APPROVAL').length
+
   const handleFilterChange = (value: string) => {
     setCursor(null)
     setCursorStack([])
     setNextCursor(null)
     setSearchParams(value === 'all' ? {} : { status: value })
-  }
-
-  const handleNextPage = () => {
-    if (!nextCursor) return
-    setCursorStack(prev => [...prev, cursor])
-    setCursor(nextCursor)
-  }
-
-  const handlePrevPage = () => {
-    setCursorStack(prev => {
-      if (prev.length === 0) return prev
-      setCursor(prev[prev.length - 1])
-      return prev.slice(0, -1)
-    })
   }
 
   const handleSeed = async () => {
@@ -155,191 +107,129 @@ export function DashboardPage() {
       setCursor(null)
       setCursorStack([])
       await fetchIncidents()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '载入演示数据失败')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '载入演示事故失败')
       setLoading(false)
     }
   }
 
-  const hasData = !loading && !error
-  const activeCount = incidents.filter(i => !['RESOLVED', 'ESCALATED', 'FAILED'].includes(i.status)).length
-  const resolvedCount = incidents.filter(i => i.status === 'RESOLVED').length
-  const criticalCount = incidents.filter(i => i.severity === 'critical').length
-  const approvalCount = incidents.filter(i => i.status === 'AWAITING_APPROVAL').length
-  const topologyTone: ServiceNodeProps['tone'] = !hasData ? 'unknown' : activeCount > 0 ? 'degraded' : 'healthy'
+  const handleNextPage = () => {
+    if (!nextCursor) return
+    setCursorStack(prev => [...prev, cursor])
+    setCursor(nextCursor)
+  }
+
+  const handlePrevPage = () => {
+    setCursorStack(prev => {
+      if (!prev.length) return prev
+      setCursor(prev[prev.length - 1])
+      return prev.slice(0, -1)
+    })
+  }
 
   return (
     <div className={styles.page}>
       <header className={styles.pageHeader}>
-        <div className={styles.titleGroup}>
-          <div className={styles.eyebrow}><span className={styles.livePulse} /> INCIDENT DESK / LOCAL EXERCISE</div>
-          <h1 className={styles.title}>事故指挥室</h1>
-          <p className={styles.subtitle}>从异常信号到人工批准的恢复动作，所有调查证据都在同一条链路上。</p>
+        <div>
+          <p className={styles.breadcrumb}>事故响应工作台 / 总览</p>
+          <h1 className={styles.title}>现在先处理什么？</h1>
+          <p className={styles.subtitle}>从最新事故开始，按步骤完成调查、审批和恢复。这里显示的是本地隔离环境。</p>
         </div>
         <div className={styles.actions}>
-          <button className={styles.btnSecondary} type="button" onClick={fetchIncidents} title="刷新事故数据">
-            <RefreshCw size={15} aria-hidden="true" />
-            刷新
+          <button className={styles.secondaryButton} type="button" onClick={fetchIncidents} disabled={loading}>
+            <RefreshCw size={15} className={loading ? styles.spin : ''} aria-hidden="true" /> 刷新
           </button>
-          {!seeded && (
-            <button className={styles.btnPrimary} type="button" onClick={handleSeed}>
-              <Zap size={15} aria-hidden="true" />
-              载入演示事故
-            </button>
-          )}
+          {!seeded && <button className={styles.primaryButton} type="button" onClick={handleSeed}><Activity size={15} aria-hidden="true" /> 载入演示事故</button>}
         </div>
       </header>
 
-      <section className={styles.metricStrip} aria-label="事故状态摘要">
-        <div className={styles.metricItem}>
-          <span><Activity size={14} aria-hidden="true" /> 活跃事故</span>
-          <strong>{hasData ? activeCount : '—'}</strong>
-          <small>当前结果集</small>
+      <section className={styles.flowSection} aria-label="事故处理流程">
+        <div className={styles.sectionHeading}>
+          <div><span className={styles.sectionKicker}>处理流程</span><h2>每一步都能回到证据</h2></div>
+          <span className={styles.flowHint}>当前环境：本地演练</span>
         </div>
-        <div className={styles.metricItem}>
-          <span><AlertTriangle size={14} aria-hidden="true" /> 待审批</span>
-          <strong className={hasData && approvalCount > 0 ? styles.metricAccent : ''}>{hasData ? approvalCount : '—'}</strong>
-          <small>需要值班工程师确认</small>
-        </div>
-        <div className={styles.metricItem}>
-          <span><ShieldCheck size={14} aria-hidden="true" /> 严重事故</span>
-          <strong className={hasData && criticalCount > 0 ? styles.metricDanger : ''}>{hasData ? criticalCount : '—'}</strong>
-          <small>critical severity</small>
-        </div>
-        <div className={styles.metricItem}>
-          <span><CheckCircle2 size={14} aria-hidden="true" /> 已恢复</span>
-          <strong className={styles.metricSuccess}>{hasData ? resolvedCount : '—'}</strong>
-          <small>通过恢复窗口验证</small>
+        <div className={styles.flow}>
+          {FLOW_STEPS.map((step, index) => {
+            const current = priorityIncident ? stepIndex(priorityIncident.status) : -1
+            const Icon = step.icon
+            const state = current === index ? 'current' : current > index ? 'done' : 'upcoming'
+            return (
+              <div key={step.key} className={`${styles.flowStep} ${styles[`flow_${state}`]}`}>
+                <span className={styles.flowIcon}><Icon size={16} aria-hidden="true" /></span>
+                <span>{step.label}</span>
+                {index < FLOW_STEPS.length - 1 && <span className={styles.flowLine} aria-hidden="true" />}
+              </div>
+            )
+          })}
         </div>
       </section>
 
-      <div className={styles.workspaceGrid}>
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <div className={styles.panelEyebrow}>SERVICE TOPOLOGY</div>
-              <h2>演练业务链路</h2>
-            </div>
-            <span className={styles.panelMeta}><GitBranch size={14} aria-hidden="true" /> 3 services / 1 data path</span>
+      <section className={styles.focusGrid} aria-label="当前重点">
+        <div className={styles.focusPanel}>
+          <div className={styles.sectionHeading}>
+            <div><span className={styles.sectionKicker}>下一步</span><h2>{priorityIncident ? (pendingApproval ? '审核恢复动作' : '打开最重要的事故') : '先载入一条演示事故'}</h2></div>
+            {priorityIncident && <span className={`${styles.statusBadge} ${STATUS_CLASS[priorityIncident.status] || ''}`}>{STATUS_LABELS[priorityIncident.status] || priorityIncident.status}</span>}
           </div>
-          <div className={styles.topology} aria-label="订单、库存、支付服务拓扑">
-            <ServiceNode name="order-api" role="入口 / checkout" metric={!hasData ? '—' : topologyTone === 'healthy' ? '99.98%' : '12.4%'} detail={hasData ? 'success rate' : 'unavailable'} tone={topologyTone} icon={Server} />
-            <ChevronRight className={styles.topologyArrow} size={22} aria-hidden="true" />
-            <ServiceNode name="inventory-api" role="dependency / stock" metric={!hasData ? '—' : topologyTone === 'healthy' ? '180 ms' : '3.2 s'} detail={hasData ? 'p99 latency' : 'unavailable'} tone={!hasData ? 'unknown' : activeCount > 0 ? 'watch' : 'healthy'} icon={Database} />
-            <ChevronRight className={styles.topologyArrow} size={22} aria-hidden="true" />
-            <ServiceNode name="payment-api" role="dependency / charge" metric={!hasData ? '—' : topologyTone === 'healthy' ? '0.3%' : '12.0%'} detail={hasData ? 'error rate' : 'unavailable'} tone={!hasData ? 'unknown' : activeCount > 0 ? 'degraded' : 'healthy'} icon={Zap} />
-          </div>
-          <div className={styles.topologyFooter}>
-            <span><span className={styles.legendDot} /> request path</span>
-            <span><TimerReset size={14} aria-hidden="true" /> {hasData ? 'last signal 12s ago' : 'signal unavailable'}</span>
-            <span>profile: <b>light</b></span>
-          </div>
-        </section>
-
-        <section className={`${styles.panel} ${styles.attentionPanel}`}>
-          <div className={styles.panelHeader}>
-            <div>
-              <div className={styles.panelEyebrow}>CURRENT ATTENTION</div>
-              <h2>值班关注</h2>
-            </div>
-            <span className={styles.signalCount}>{approvalCount} pending</span>
-          </div>
-          {approvalCount > 0 ? (
-            <div className={styles.attentionLead}>
-              <span className={styles.attentionIcon}><AlertTriangle size={19} aria-hidden="true" /></span>
-              <div>
-                <strong>有恢复动作等待确认</strong>
-                <p>先检查目标、参数、风险等级和计划哈希，再决定是否批准。</p>
+          {priorityIncident ? (
+            <>
+              <p className={styles.focusTitle}>{priorityIncident.alert_name}</p>
+              <p className={styles.focusDescription}>{priorityIncident.description}</p>
+              <div className={styles.focusMeta}>
+                <span className={SEVERITY_CLASS[priorityIncident.severity] || ''}>{SEVERITY_LABELS[priorityIncident.severity] || priorityIncident.severity}</span>
+                <span>最近更新 {formatTime(priorityIncident.updated_at)}</span>
               </div>
-            </div>
+              <Link className={styles.actionLink} to={`/incidents/${priorityIncident.id}`}>
+                {pendingApproval ? '查看证据并处理审批' : '打开事故详情'} <ArrowRight size={16} aria-hidden="true" />
+              </Link>
+            </>
           ) : (
-            <div className={styles.attentionLead}>
-              <span className={`${styles.attentionIcon} ${styles.attentionIconClear}`}><CheckCircle2 size={19} aria-hidden="true" /></span>
-              <div>
-                <strong>当前没有待审批动作</strong>
-                <p>可以从演练场景启动一次固定故障调查。</p>
-              </div>
-            </div>
+            <>
+              <p className={styles.focusDescription}>没有事故时，先载入演示数据，或进入“故障演练”选择一个固定场景。</p>
+              <div className={styles.emptyActions}><button className={styles.primaryButton} type="button" onClick={handleSeed}><Activity size={15} aria-hidden="true" /> 载入演示事故</button><Link className={styles.textLink} to="/scenarios">去选择故障演练 <ArrowRight size={15} aria-hidden="true" /></Link></div>
+            </>
           )}
-          <div className={styles.signalRows}>
-            <div><span>Telemetry</span><b className={error ? styles.warnText : styles.okText}>{error ? 'unavailable' : 'connected'}</b></div>
-            <div><span>Diagnostic tools</span><b className={error ? styles.warnText : styles.okText}>{error ? 'unavailable' : 'read-only'}</b></div>
-            <div><span>Action Gateway</span><b className={styles.warnText}>{error ? 'unknown' : 'approval gated'}</b></div>
+        </div>
+        <div className={styles.contextPanel}>
+          <div className={styles.sectionHeading}><div><span className={styles.sectionKicker}>当前环境</span><h2>系统可以安全演练</h2></div><CheckCircle2 size={20} className={styles.contextIcon} aria-hidden="true" /></div>
+          <p>数据来自隔离 fixture。诊断工具只读，恢复动作需要人工审批。</p>
+          <div className={styles.contextRows}>
+            <div><span>信号接入</span><strong className={styles.good}>已连接</strong></div>
+            <div><span>诊断工具</span><strong className={styles.good}>只读</strong></div>
+            <div><span>恢复动作</span><strong className={styles.waiting}>需要审批</strong></div>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
 
-      <section className={styles.incidentSection}>
+      <section className={styles.summaryBar} aria-label="事故摘要">
+        <div><span>活跃事故</span><strong>{loading ? '—' : activeIncidents.length}</strong></div>
+        <div><span>待处理审批</span><strong className={approvalCount ? styles.numberWarning : ''}>{loading ? '—' : approvalCount}</strong></div>
+        <div><span>严重事故</span><strong className={criticalCount ? styles.numberDanger : ''}>{loading ? '—' : criticalCount}</strong></div>
+        <div><span>已恢复</span><strong className={styles.numberSuccess}>{loading ? '—' : resolvedCount}</strong></div>
+      </section>
+
+      <section className={styles.queueSection}>
         <div className={styles.sectionHeader}>
-          <div>
-            <div className={styles.panelEyebrow}>INCIDENT QUEUE</div>
-            <h2>事故队列</h2>
-          </div>
+          <div><span className={styles.sectionKicker}>事故列表</span><h2>所有事故</h2></div>
           <div className={styles.filterBar} aria-label="事故筛选">
-            {STATUS_FILTERS.map(filter => (
-              <button
-                key={filter.value}
-                className={filter.value === statusFilter ? styles.filterActive : styles.filterButton}
-                type="button"
-                aria-pressed={filter.value === statusFilter}
-                onClick={() => handleFilterChange(filter.value)}
-              >
-                {filter.label}
-              </button>
-            ))}
+            {STATUS_FILTERS.map(filter => <button key={filter.value} className={filter.value === statusFilter ? styles.filterActive : styles.filterButton} type="button" aria-pressed={filter.value === statusFilter} onClick={() => handleFilterChange(filter.value)}>{filter.label}</button>)}
           </div>
         </div>
 
-        {error && (
-          <div className={styles.errorBanner} role="alert">
-            <AlertTriangle size={16} aria-hidden="true" />
-            <span>{error}。请先启动 Control API。</span>
+        {error && <div className={styles.errorBanner} role="alert"><AlertTriangle size={16} aria-hidden="true" /> {error}。请确认控制面已启动。</div>}
+        {loading ? <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} /> 正在加载事故</div> : error ? <div className={styles.emptyState}><AlertTriangle size={22} aria-hidden="true" /><strong>暂时无法读取事故</strong><span>数据不完整时不会显示“暂无事故”。</span></div> : incidents.length === 0 ? <div className={styles.emptyState}><Timer size={22} aria-hidden="true" /><strong>没有符合条件的事故</strong><span>可以切换筛选，或去故障演练创建一条新的事故。</span></div> : (
+          <div className={styles.table} role="table" aria-label="事故列表">
+            <div className={styles.tableHeader} role="row"><span>状态</span><span>事故</span><span>影响描述</span><span>级别</span><span>时间</span><span aria-hidden="true" /></div>
+            {incidents.map(incident => <Link key={incident.id} to={`/incidents/${incident.id}`} className={styles.tableRow} role="row">
+              <span className={styles.statusCell} data-label="状态"><span className={`${styles.statusBadge} ${STATUS_CLASS[incident.status] || ''}`}><span className={styles.statusDotSmall} />{STATUS_LABELS[incident.status] || incident.status}</span></span>
+              <span className={styles.nameCell} data-label="事故">{incident.alert_name}</span>
+              <span className={styles.descriptionCell} data-label="影响描述">{incident.description}</span>
+              <span className={`${styles.severityCell} ${SEVERITY_CLASS[incident.severity] || ''}`} data-label="级别">{SEVERITY_LABELS[incident.severity] || incident.severity}</span>
+              <span className={styles.timeCell} data-label="时间">{formatTime(incident.created_at)}</span>
+              <span className={styles.rowArrow}><ArrowRight size={16} aria-hidden="true" /></span>
+            </Link>)}
           </div>
         )}
-
-        {loading ? (
-          <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} />加载事故队列</div>
-        ) : error ? (
-          <div className={styles.emptyState} role="status">
-            <AlertTriangle size={24} aria-hidden="true" />
-            <strong>事故队列不可用</strong>
-            <span>当前没有可靠数据，不显示“暂无事故”。请确认 Control API 已启动。</span>
-          </div>
-        ) : incidents.length === 0 ? (
-          <div className={styles.emptyState}>
-            <CircleDot size={24} aria-hidden="true" />
-            <strong>暂无事故记录</strong>
-            <span>载入演示事故，或从演练场景启动一次故障。</span>
-          </div>
-        ) : (
-          <div className={styles.table} role="table" aria-label="事故队列">
-            <div className={styles.tableHeader} role="row">
-              <span>状态</span><span>级别</span><span>告警名称</span><span>当前描述</span><span>时间</span><span aria-hidden="true" />
-            </div>
-            {incidents.map(inc => (
-              <Link key={inc.id} to={`/incidents/${inc.id}`} className={styles.tableRow} role="row">
-                <span className={styles.statusCell} data-label="状态">
-                  <span className={`${styles.statusBadge} ${STATUS_CLASS[inc.status] || ''}`}>
-                    <CircleDot size={10} fill="currentColor" aria-hidden="true" />
-                    {STATUS_LABELS[inc.status] || inc.status}
-                  </span>
-                </span>
-                <span className={`${styles.severityCell} ${SEVERITY_CLASS[inc.severity] || ''}`} data-label="级别">{inc.severity}</span>
-                <span className={styles.nameCell} data-label="告警名称">{inc.alert_name}</span>
-                <span className={styles.descriptionCell} data-label="当前描述">{inc.description}</span>
-                <span className={styles.timeCell} data-label="时间">{new Date(inc.created_at).toLocaleTimeString('zh-CN')}</span>
-                <span className={styles.rowArrow}><ArrowUpRight size={16} aria-hidden="true" /></span>
-              </Link>
-            ))}
-          </div>
-        )}
-
-        {!loading && incidents.length > 0 && (
-          <div className={styles.pagination}>
-            <button className={styles.btnGhost} type="button" disabled={cursorStack.length === 0} onClick={handlePrevPage}>上一页</button>
-            <button className={styles.btnGhost} type="button" disabled={!nextCursor} onClick={handleNextPage}>下一页</button>
-          </div>
-        )}
+        {!loading && incidents.length > 0 && <div className={styles.pagination}><button className={styles.pageButton} type="button" disabled={!cursorStack.length} onClick={handlePrevPage}>上一页</button><button className={styles.pageButton} type="button" disabled={!nextCursor} onClick={handleNextPage}>下一页</button></div>}
       </section>
     </div>
   )

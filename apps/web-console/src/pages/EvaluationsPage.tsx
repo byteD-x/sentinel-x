@@ -32,9 +32,9 @@ export function EvaluationsPage() {
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <div className={styles.eyebrow}><BarChart3 size={14} aria-hidden="true" /> EVALUATION EVIDENCE</div>
-          <h1>评测证据</h1>
-          <p>当前 light profile 只展示可复查的演练 fixture 状态，不把固定输出包装成生产指标。</p>
+          <div className={styles.eyebrow}><BarChart3 size={14} aria-hidden="true" /> 验证记录</div>
+          <h1>验证记录</h1>
+          <p>这里展示本地演练中可以复查的证据，不把固定演示结果包装成生产指标。</p>
         </div>
         <button className={styles.refresh} type="button" onClick={load} disabled={loading} title="刷新评测状态">
           <RefreshCw size={15} aria-hidden="true" /> 刷新
@@ -44,19 +44,19 @@ export function EvaluationsPage() {
         <div className={styles.error} role="alert"><CircleAlert size={17} aria-hidden="true" />{error}</div>
       ) : (
         <div className={styles.grid}>
-          <article className={styles.item}>
-            <CheckCircle2 size={18} aria-hidden="true" />
-            <div><strong>场景 ground truth</strong><span>固定场景目录和时间线事件可复查</span></div>
-            <b>light fixture</b>
+            <article className={styles.item}>
+              <CheckCircle2 size={18} aria-hidden="true" />
+            <div><strong>固定场景</strong><span>场景目录和处理时间线可以复查</span></div>
+            <b>可复查</b>
           </article>
           <article className={styles.item}>
             <FileText size={18} aria-hidden="true" />
-            <div><strong>证据账本</strong><span>来源、序号和摘要随事故时间线保存</span></div>
+            <div><strong>调查证据</strong><span>来源、序号和摘要随事故时间线保存</span></div>
             <b>可用</b>
           </article>
           <article className={styles.item}>
             <CircleAlert size={18} aria-hidden="true" />
-            <div><strong>生产 benchmark</strong><span>根因准确率、MTTR、模型成本尚未测量</span></div>
+            <div><strong>生产指标</strong><span>根因准确率、恢复时间和模型成本尚未测量</span></div>
             <b>未声明</b>
           </article>
         </div>
@@ -68,4 +68,3 @@ export function EvaluationsPage() {
     </div>
   )
 }
-
