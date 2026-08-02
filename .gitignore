@@ -31,6 +31,7 @@ tmp/
 artifacts/
 reports/raw/
 .codex/visual-qa/
+apps/web-console/.codex/
 *.log
 
 # Editors and OS
