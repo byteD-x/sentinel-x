@@ -20,7 +20,7 @@ export function EvaluationsPage() {
       setHealth(await response.json())
       setError(null)
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : '评测状态不可用')
+      setError(cause instanceof ApiError ? cause.message : '演练记录暂时不可用')
     } finally {
       setLoading(false)
     }
@@ -32,11 +32,11 @@ export function EvaluationsPage() {
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <div className={styles.eyebrow}><BarChart3 size={14} aria-hidden="true" /> 验证记录</div>
-          <h1>验证记录</h1>
-          <p>这里展示本地演练中可以复查的证据，不把固定演示结果包装成生产指标。</p>
+          <div className={styles.eyebrow}><BarChart3 size={14} aria-hidden="true" /> 演练记录</div>
+          <h1>演练记录</h1>
+          <p>这里记录演练过程中的故障、证据和处置结果，不代表线上系统指标。</p>
         </div>
-        <button className={styles.refresh} type="button" onClick={load} disabled={loading} title="刷新评测状态">
+        <button className={styles.refresh} type="button" onClick={load} disabled={loading} title="刷新演练记录状态">
           <RefreshCw size={15} aria-hidden="true" /> 刷新
         </button>
       </header>
@@ -46,24 +46,24 @@ export function EvaluationsPage() {
         <div className={styles.grid}>
             <article className={styles.item}>
               <CheckCircle2 size={18} aria-hidden="true" />
-            <div><strong>固定场景</strong><span>场景目录和处理时间线可以复查</span></div>
-            <b>可复查</b>
+            <div><strong>故障场景</strong><span>场景定义和处置时间线可回看</span></div>
+            <b>可回看</b>
           </article>
           <article className={styles.item}>
             <FileText size={18} aria-hidden="true" />
-            <div><strong>调查证据</strong><span>来源、序号和摘要随事故时间线保存</span></div>
-            <b>可用</b>
+            <div><strong>调查证据</strong><span>来源、序号和摘要随时间线保存</span></div>
+            <b>可查看</b>
           </article>
           <article className={styles.item}>
             <CircleAlert size={18} aria-hidden="true" />
-            <div><strong>生产指标</strong><span>根因准确率、恢复时间和模型成本尚未测量</span></div>
-            <b>未声明</b>
+            <div><strong>效果指标</strong><span>线上恢复速度和诊断准确度暂未采集</span></div>
+            <b>未采集</b>
           </article>
         </div>
       )}
       <section className={styles.note}>
-        <strong>运行上下文</strong>
-        <span>profile: {health?.profile || 'unknown'} · actions: {health?.actions_enabled ? 'enabled by explicit config' : 'disabled / kill switch'}</span>
+        <strong>当前模式</strong>
+        <span>演练环境 · 恢复操作{health?.actions_enabled ? '需审批' : '已关闭'}</span>
       </section>
     </div>
   )

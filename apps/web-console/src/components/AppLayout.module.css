@@ -35,8 +35,8 @@
   .layout { display: block; }
   .sidebar { width: 100%; min-height: 0; padding: 15px 18px 0; border-right: 0; border-bottom: 1px solid #29445f; }
   .navBlock { margin-top: 20px; }
-  .nav { display: flex; overflow-x: auto; padding-bottom: 13px; }
-  .navLink, .navLinkActive { min-width: max-content; border-left: 0; border-bottom: 2px solid transparent; }
+  .nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding-bottom: 13px; }
+  .navLink, .navLinkActive { min-width: 0; border-left: 0; border-bottom: 2px solid transparent; padding: 0 8px; overflow-wrap: anywhere; }
   .navLinkActive { border-bottom-color: #8bd4c0; }
   .sidebarFooter { display: none; }
   .topbar { min-height: 48px; padding: 0 18px; }
@@ -50,4 +50,8 @@
   .topbar { padding: 0 16px; }
   .streamStatus span { display: none; }
   .roleBadge { display: none; }
+}
+
+@media (max-width: 420px) {
+  .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

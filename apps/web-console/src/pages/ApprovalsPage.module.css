@@ -146,6 +146,7 @@
 .approvalMeta code,
 .approvalMeta time { min-width: 0; color: var(--color-text-muted); font-family: var(--font-mono); font-size: 10px; font-weight: 500; text-align: right; overflow-wrap: anywhere; }
 .detailButton { justify-content: center; gap: 6px; min-height: 34px; margin-top: 8px; border: 1px solid var(--color-border-strong); color: var(--color-text); font-size: 11px; font-weight: 650; }
+.technicalDetails { margin-top: 2px; border-top: 1px solid var(--color-border); }.technicalDetails summary { padding-top: 8px; color: var(--color-text-dim); cursor: pointer; font-size: 10px; }.technicalDetails code { display: block; margin-top: 6px; padding: 8px; overflow-x: auto; color: var(--color-text-dim); background: var(--color-bg); font-size: 10px; line-height: 1.5; }
 
 .empty { min-height: 220px; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--color-text-muted); font-size: 12px; }
 .emptyState { min-height: 260px; display: grid; place-items: center; align-content: center; gap: 8px; border-top: 1px solid var(--color-border); color: var(--color-text-dim); text-align: center; }

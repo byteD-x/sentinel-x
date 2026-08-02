@@ -2,23 +2,16 @@ import { Activity, BarChart3, Circle, ClipboardCheck, FlaskConical, LockKeyhole,
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { apiFetch, currentRole } from '../lib/api'
+import { ROLE_LABELS } from '../lib/presentation'
 import styles from './AppLayout.module.css'
 
 const navigation = [
-  { to: '/', label: '事故总览', icon: Activity, end: true },
-  { to: '/approvals', label: '待处理审批', icon: ClipboardCheck },
-  { to: '/scenarios', label: '故障演练', icon: FlaskConical },
-  { to: '/evaluations', label: '验证记录', icon: BarChart3 },
-  { to: '/system', label: '环境状态', icon: TerminalSquare },
+  { to: '/', label: '故障总览', icon: Activity, end: true },
+  { to: '/approvals', label: '恢复审批', icon: ClipboardCheck },
+  { to: '/scenarios', label: '故障场景', icon: FlaskConical },
+  { to: '/evaluations', label: '演练记录', icon: BarChart3 },
+  { to: '/system', label: '环境', icon: TerminalSquare },
 ]
-
-const ROLE_LABELS: Record<string, string> = {
-  viewer: '只读观察员',
-  approver: '审批人',
-  scenario_operator: '演练操作员',
-  planner: '方案规划员',
-  system: '系统服务',
-}
 
 export function AppLayout() {
   const role = currentRole()
@@ -40,7 +33,7 @@ export function AppLayout() {
     return () => { active = false; window.clearInterval(timer) }
   }, [])
 
-  const healthLabel = health.state === 'online' ? '控制面已连接' : health.state === 'loading' ? '正在连接控制面' : '控制面离线'
+  const healthLabel = health.state === 'online' ? '系统已连接' : health.state === 'loading' ? '正在连接系统' : '系统未连接'
   const healthClass = health.state === 'online' ? styles.streamOnline : health.state === 'loading' ? styles.streamChecking : styles.streamOffline
 
   return (
@@ -50,9 +43,9 @@ export function AppLayout() {
           <div className={styles.brandMark} aria-hidden="true"><ShieldCheck size={20} strokeWidth={2.3} /></div>
           <div>
             <div className={styles.brandName}>Sentinel-X</div>
-            <div className={styles.brandCaption}>事故响应控制台</div>
+            <div className={styles.brandCaption}>故障处理台</div>
           </div>
-          <span className={styles.brandBadge}>演示</span>
+          <span className={styles.brandBadge}>演练</span>
         </div>
 
         <div className={styles.navBlock}>
@@ -76,13 +69,13 @@ export function AppLayout() {
           <div className={styles.environmentStatus}>
             <span className={`${styles.statusDot} ${health.state === 'offline' ? styles.statusDotOffline : ''}`} aria-hidden="true" />
             <div>
-              <strong>本地隔离环境</strong>
-              <span>{health.profile || 'light'} · {ROLE_LABELS[role] || role}</span>
+              <strong>演练环境</strong>
+              <span>{ROLE_LABELS[role] || '只读'}</span>
             </div>
           </div>
           <div className={styles.safetyNote}>
             <LockKeyhole size={14} aria-hidden="true" />
-            <span>{health.actionsEnabled ? '恢复动作需要审批' : '恢复动作已被安全开关关闭'}</span>
+            <span>{health.actionsEnabled ? '恢复操作需审批' : '恢复操作已关闭'}</span>
           </div>
         </div>
       </aside>
@@ -90,15 +83,15 @@ export function AppLayout() {
       <div className={styles.contentShell}>
         <header className={styles.topbar}>
           <div className={styles.topbarContext}>
-            <span className={styles.topbarKicker}>事故响应工作台</span>
+            <span className={styles.topbarKicker}>故障处理台</span>
             <span className={styles.topbarDivider}>·</span>
-            <span>本地演练环境</span>
+            <span>演练环境</span>
           </div>
           <div className={`${styles.streamStatus} ${healthClass}`} role="status" aria-live="polite">
             <Radio size={14} aria-hidden="true" />
             <span>{healthLabel}</span>
             <Circle size={7} fill="currentColor" aria-hidden="true" />
-            <span className={styles.roleBadge}>{ROLE_LABELS[role] || role}</span>
+            <span className={styles.roleBadge}>{ROLE_LABELS[role] || '只读'}</span>
           </div>
         </header>
         <main className={styles.main}><Outlet /></main>

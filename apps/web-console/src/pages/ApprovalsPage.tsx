@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, ArrowUpRight, Clock3, ClipboardCheck, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch, currentRole } from '../lib/api'
+import { INCIDENT_STATUS_LABELS, ROLE_LABELS, SEVERITY_LABELS, actionLabel, incidentDescription, riskLabel, serviceLabel } from '../lib/presentation'
 import styles from './ApprovalsPage.module.css'
 
 interface ApprovalIncident {
@@ -28,7 +29,7 @@ interface ApprovalItem {
 }
 
 const FILTERS = [
-  { value: 'pending', label: '待处理' },
+  { value: 'pending', label: '待审批' },
   { value: 'all', label: '全部记录' },
   { value: 'approved', label: '已批准' },
   { value: 'rejected', label: '已拒绝' },
@@ -36,16 +37,10 @@ const FILTERS = [
 ]
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: '待处理',
+  pending: '待审批',
   approved: '已批准',
   rejected: '已拒绝',
   expired: '已过期',
-}
-
-const INCIDENT_STATUS_LABELS: Record<string, string> = {
-  DETECTED: '已发现', TRIAGING: '分诊中', DIAGNOSING: '调查中', PLAN_PROPOSED: '方案待审',
-  AWAITING_APPROVAL: '等待审批', EXECUTING: '执行中', VERIFYING: '验证中', RESOLVED: '已恢复',
-  ESCALATED: '已升级', FAILED: '失败',
 }
 
 const STATUS_CLASS: Record<string, string> = {
@@ -102,13 +97,13 @@ export function ApprovalsPage() {
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <div className={styles.eyebrow}><ClipboardCheck size={14} aria-hidden="true" /> 待处理审批 / 恢复动作</div>
-          <h1 className={styles.title}>审批队列</h1>
-          <p className={styles.subtitle}>这里列出需要人工确认的恢复动作。决定前，请先打开事故详情，核对影响、证据和执行目标。当前角色：{role === 'approver' ? '审批人' : '只读观察员'}。</p>
+          <div className={styles.eyebrow}><ClipboardCheck size={14} aria-hidden="true" /> 恢复审批</div>
+          <h1 className={styles.title}>恢复操作审批</h1>
+          <p className={styles.subtitle}>这里列出等待审批的恢复操作。查看故障影响、证据和目标服务后，再提交审批决定。当前角色：{ROLE_LABELS[role] || '只读'}。</p>
         </div>
         <button className={styles.refreshButton} type="button" onClick={fetchApprovals} disabled={loading} title="刷新审批队列">
           <RefreshCw size={15} className={loading ? styles.spin : ''} aria-hidden="true" />
-          刷新队列
+          刷新审批队列
         </button>
       </header>
 
@@ -116,8 +111,8 @@ export function ApprovalsPage() {
         <div className={styles.summaryLead}>
           <span className={styles.summaryIcon}><ShieldCheck size={17} aria-hidden="true" /></span>
           <div>
-            <strong>{statusFilter === 'pending' ? `${items.length} 项等待人工判断` : `${items.length} 条审批记录`}</strong>
-          <span>{statusFilter === 'pending' ? '恢复动作会在审批后才会执行' : '这里只展示已经留下记录的决定'}</span>
+            <strong>{statusFilter === 'pending' ? `${items.length} 项待审批` : `${items.length} 条审批记录`}</strong>
+          <span>{statusFilter === 'pending' ? '审批通过后才会执行恢复操作' : '这里只展示已经提交的审批决定'}</span>
           </div>
         </div>
         <div className={styles.filters} aria-label="审批状态筛选">
@@ -138,17 +133,17 @@ export function ApprovalsPage() {
       {error && (
         <div className={styles.error} role="alert">
           <AlertTriangle size={16} aria-hidden="true" />
-          <span>审批队列暂时不可用：{error}。已有页面不会提交写操作。</span>
+          <span>暂时无法读取审批队列：{error}。请稍后重试。</span>
         </div>
       )}
 
       {loading ? (
-        <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} />加载审批记录</div>
+        <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} />加载审批队列</div>
       ) : items.length === 0 ? (
         <div className={styles.emptyState}>
           <ClipboardCheck size={24} aria-hidden="true" />
-          <strong>{statusFilter === 'pending' ? '当前没有待处理审批' : '没有匹配的审批记录'}</strong>
-          <span>{statusFilter === 'pending' ? '新的 R1 计划进入控制面后，会出现在这里。' : '尝试切换状态筛选，或返回事故指挥室查看活跃事故。'}</span>
+          <strong>{statusFilter === 'pending' ? '当前没有待审批的恢复操作' : '没有符合条件的审批记录'}</strong>
+          <span>{statusFilter === 'pending' ? '新的恢复操作会在生成方案后显示。' : '可以切换筛选，查看历史审批决定。'}</span>
         </div>
       ) : (
         <section className={styles.queue} aria-label="审批记录" role="list">
@@ -157,28 +152,31 @@ export function ApprovalsPage() {
               <span className={`${styles.statusRail} ${STATUS_CLASS[item.status] || ''}`} aria-hidden="true" />
               <div className={styles.approvalMain}>
                 <div className={styles.rowTopline}>
-                  <span className={`${styles.severity} ${SEVERITY_CLASS[item.incident.severity] || ''}`}>{item.incident.severity}</span>
+                  <span className={`${styles.severity} ${SEVERITY_CLASS[item.incident.severity] || ''}`}>{SEVERITY_LABELS[item.incident.severity] || item.incident.severity}</span>
                   <span className={`${styles.status} ${STATUS_CLASS[item.status] || ''}`}>{STATUS_LABELS[item.status] || item.status}</span>
-                  <span className={styles.expiry}><Clock3 size={13} aria-hidden="true" />{item.status === 'pending' ? `过期 ${formatDate(item.expires_at)}` : `决定于 ${formatDate(item.created_at)}`}</span>
+                  <span className={styles.expiry}><Clock3 size={13} aria-hidden="true" />{item.status === 'pending' ? `审批截止 ${formatDate(item.expires_at)}` : `审批于 ${formatDate(item.created_at)}`}</span>
                 </div>
-                <h2>{item.runbook_ref}</h2>
+                <h2>{actionLabel(item.runbook_ref)}</h2>
                 <div className={styles.targetLine}>
-                  <span>目标</span>
-                  <strong>{item.target}</strong>
-                  <span className={styles.risk}>可逆恢复动作</span>
+                  <span>目标服务</span>
+                  <strong>{serviceLabel(item.target)}</strong>
+                  <span className={styles.risk}>{riskLabel(item.risk_level)}</span>
                 </div>
                 <Link className={styles.incidentLink} to={`/incidents/${item.incident_id}`}>
-                  {item.incident.alert_name}
+                  {incidentDescription(item.incident.alert_name)}
                   <ArrowUpRight size={14} aria-hidden="true" />
                 </Link>
               </div>
               <div className={styles.approvalMeta}>
-                <div><span>事故状态</span><strong>{INCIDENT_STATUS_LABELS[item.incident.status] || item.incident.status}</strong></div>
-                <div><span>计划哈希</span><code>{item.plan_hash.slice(0, 16)}…</code></div>
-                <div><span>请求时间</span><time dateTime={item.created_at}>{formatDate(item.created_at)}</time></div>
+                <div><span>故障状态</span><strong>{INCIDENT_STATUS_LABELS[item.incident.status] || item.incident.status}</strong></div>
+                <div><span>提出时间</span><time dateTime={item.created_at}>{formatDate(item.created_at)}</time></div>
                 <Link className={styles.detailButton} to={`/incidents/${item.incident_id}`}>
-                  查看上下文 <ArrowUpRight size={14} aria-hidden="true" />
+                  查看故障详情 <ArrowUpRight size={14} aria-hidden="true" />
                 </Link>
+                <details className={styles.technicalDetails}>
+                  <summary>查看技术字段</summary>
+                  <code>动作编号：{item.runbook_ref}<br />计划校验：{item.plan_hash.slice(0, 16)}…</code>
+                </details>
               </div>
             </article>
           ))}

@@ -35,7 +35,7 @@ function NotFoundPage() {
     <section style={{ maxWidth: 640, margin: '12vh auto', textAlign: 'center' }}>
       <p style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>404 / ROUTE NOT FOUND</p>
       <h1 style={{ color: 'var(--color-text)', margin: '12px 0' }}>页面不存在</h1>
-      <p style={{ color: 'var(--color-text-muted)' }}>请从控制面导航进入事故、审批、演练或评测视图。</p>
+      <p style={{ color: 'var(--color-text-muted)' }}>请返回故障总览，或从主导航选择所需功能。</p>
     </section>
   )
 }
