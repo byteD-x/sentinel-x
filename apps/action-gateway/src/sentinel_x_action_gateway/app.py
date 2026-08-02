@@ -19,8 +19,11 @@ Action Gateway — 独立最小权限动作执行器。
 from __future__ import annotations
 
 import hashlib
+import hmac
+import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,7 +31,7 @@ from enum import Enum
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger("sentinel_x_action_gateway")
@@ -137,12 +140,14 @@ class ActionStatusResponse(BaseModel):
     error: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    execution_mode: str = "fixture"
 
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    actions_enabled: bool = True
+    actions_enabled: bool = False
     registered_runbooks: int = 0
+    profile: str = "light"
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +168,7 @@ class StoredExecution:
     error: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    execution_mode: str = "fixture"
 
 
 class ExecutionStore:
@@ -171,6 +177,7 @@ class ExecutionStore:
     def __init__(self):
         self._executions: dict[str, StoredExecution] = {}
         self._idempotency_keys: set[str] = set()
+        self.claim_lock = asyncio.Lock()
 
     def check_idempotency(self, key: str) -> Optional[StoredExecution]:
         """检查幂等键是否重复。返回已有执行或 None。"""
@@ -217,12 +224,26 @@ class ActionGate:
     def __init__(
         self,
         store: ExecutionStore,
-        kill_switch: bool = False,
+        kill_switch: bool = True,
         approval_ttl_minutes: int = 30,
+        approval_token_secret: str | None = None,
+        admin_token: str | None = None,
     ):
         self.store = store
         self.kill_switch = kill_switch
         self.approval_ttl_minutes = approval_ttl_minutes
+        self.approval_token_secret = approval_token_secret
+        self.admin_token = admin_token
+
+    def _expected_approval_token(self, req: ActionSubmitRequest) -> str | None:
+        if not self.approval_token_secret:
+            return None
+        canonical = "|".join((req.approval_id, req.incident_id, req.plan_hash, req.audience))
+        return hmac.new(
+            self.approval_token_secret.encode("utf-8"),
+            canonical.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     def validate(self, req: ActionSubmitRequest) -> tuple[bool, str, Optional[RunbookDefinition]]:
         """
@@ -234,6 +255,15 @@ class ActionGate:
         # 0. Kill Switch
         if self.kill_switch:
             return False, "Kill Switch 已激活，拒绝所有动作", None
+
+        if req.audience != "sentinel-action-gateway":
+            return False, "审批凭证 audience 不匹配", None
+
+        expected_token = self._expected_approval_token(req)
+        if not expected_token:
+            return False, "Action Gateway 未配置审批凭证密钥", None
+        if not hmac.compare_digest(req.approval_token, expected_token):
+            return False, "审批凭证无效", None
 
         # 1. Runbook 存在性
         runbook = REGISTERED_RUNBOOKS.get(req.runbook_ref)
@@ -354,6 +384,7 @@ class ActionGate:
             idempotency_key=req.idempotency_key,
             before_state=before_state,
             started_at=started_at,
+            execution_mode="fixture",
         )
         self.store.create(execution)
 
@@ -380,7 +411,12 @@ class ActionGate:
 
 
 store = ExecutionStore()
-gate = ActionGate(store=store, kill_switch=False)
+gate = ActionGate(
+    store=store,
+    kill_switch=True,
+    approval_token_secret=os.getenv("SENTINEL_APPROVAL_TOKEN_SECRET"),
+    admin_token=os.getenv("SENTINEL_ADMIN_TOKEN"),
+)
 
 
 @asynccontextmanager
@@ -399,7 +435,7 @@ app = FastAPI(
 @app.get("/health", response_model=HealthResponse)
 async def health():
     return HealthResponse(
-        actions_enabled=not gate.kill_switch,
+        actions_enabled=not gate.kill_switch and bool(gate.approval_token_secret),
         registered_runbooks=len(REGISTERED_RUNBOOKS),
     )
 
@@ -413,12 +449,13 @@ async def submit_action(req: ActionSubmitRequest):
     Runbook 存在 → MVP 启用 → R1 合法 → 目标白名单
     → 参数合规 → Plan hash 一致 → 幂等键唯一
     """
-    allowed, reason, runbook = gate.validate(req)
-    if not allowed:
-        logger.warning(f"动作被拒绝: {reason}")
-        raise HTTPException(status_code=400, detail=reason)
+    async with store.claim_lock:
+        allowed, reason, runbook = gate.validate(req)
+        if not allowed:
+            logger.warning(f"动作被拒绝: {reason}")
+            raise HTTPException(status_code=400, detail=reason)
 
-    execution = await gate.execute(runbook, req)
+        execution = await gate.execute(runbook, req)
 
     return {
         "execution_id": execution.execution_id,
@@ -426,7 +463,8 @@ async def submit_action(req: ActionSubmitRequest):
         "runbook_ref": execution.runbook_ref,
         "target": execution.target,
         "idempotency_key": execution.idempotency_key,
-        "message": "动作已提交执行",
+        "execution_mode": execution.execution_mode,
+        "message": "light fixture 已提交；未执行真实 Kubernetes 写操作",
     }
 
 
@@ -448,6 +486,7 @@ async def get_action_status(execution_id: str):
         error=execution.error,
         started_at=execution.started_at,
         completed_at=execution.completed_at,
+        execution_mode=execution.execution_mode,
     )
 
 
@@ -469,8 +508,13 @@ async def list_runbooks():
 
 
 @app.post("/api/admin/kill-switch")
-async def toggle_kill_switch(activate: bool = True):
+async def toggle_kill_switch(
+    activate: bool = True,
+    admin_token: Optional[str] = Header(default=None, alias="X-Sentinel-Admin-Token"),
+):
     """管理端点：切换 Kill Switch。"""
+    if not gate.admin_token or not admin_token or not hmac.compare_digest(admin_token, gate.admin_token):
+        raise HTTPException(status_code=403, detail="需要有效的运维管理凭证")
     gate.kill_switch = activate
     return {
         "kill_switch": gate.kill_switch,

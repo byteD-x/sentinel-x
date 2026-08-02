@@ -205,6 +205,8 @@
 .node_watch .nodeStatus { color: var(--color-warning); }
 .node_degraded { border-top-color: var(--color-danger); }
 .node_degraded .nodeStatus { color: var(--color-danger); }
+.node_unknown { border-top-color: var(--color-border-strong); }
+.node_unknown .nodeStatus { color: var(--color-text-dim); }
 
 .topologyFooter {
   display: flex;

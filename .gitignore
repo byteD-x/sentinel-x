@@ -30,6 +30,7 @@ coverage/
 tmp/
 artifacts/
 reports/raw/
+.codex/visual-qa/
 *.log
 
 # Editors and OS

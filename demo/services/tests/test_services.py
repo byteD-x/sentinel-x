@@ -4,6 +4,7 @@ import asyncio
 import pytest
 import threading
 import time
+import socket
 import httpx
 import uvicorn
 
@@ -17,44 +18,83 @@ class ServerThread(threading.Thread):
         self.port = port
 
     def run(self):
-        uvicorn.run(self.app, host=self.host, port=self.port, log_level="warning")
+        config = uvicorn.Config(
+            self.app,
+            host=self.host,
+            port=self.port,
+            log_level="warning",
+            timeout_graceful_shutdown=0,
+        )
+        self.server = uvicorn.Server(config)
+        asyncio.run(self.server.serve())
+
+    def stop(self):
+        if getattr(self, "server", None):
+            self.server.should_exit = True
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 @pytest.fixture(scope="module")
 def services():
     """启动三个微服务。"""
-    from sentinel_x_demo.order_api import app as order_app
+    import sentinel_x_demo.order_api as order_module
     from sentinel_x_demo.inventory_api import app as inventory_app
     from sentinel_x_demo.payment_api import app as payment_app
 
+    ports = {"order": _free_port(), "inventory": _free_port(), "payment": _free_port()}
+    order_module.INVENTORY_URL = f"http://127.0.0.1:{ports['inventory']}"
+    order_module.PAYMENT_URL = f"http://127.0.0.1:{ports['payment']}"
     servers = [
-        ServerThread(order_app, port=8082),
-        ServerThread(inventory_app, port=8083),
-        ServerThread(payment_app, port=8084),
+        ServerThread(order_module.app, port=ports["order"]),
+        ServerThread(inventory_app, port=ports["inventory"]),
+        ServerThread(payment_app, port=ports["payment"]),
     ]
     for s in servers:
         s.start()
-    time.sleep(3)  # 等待启动
-    yield
-    # 线程自动清理（daemon=True）
+    for name, port in ports.items():
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            try:
+                response = httpx.get(f"http://127.0.0.1:{port}/health", timeout=0.3)
+                if response.status_code == 200:
+                    break
+            except httpx.HTTPError:
+                pass
+            time.sleep(0.1)
+        else:
+            for server in servers:
+                server.stop()
+            raise RuntimeError(f"{name} service readiness timeout")
+    try:
+        yield ports
+    finally:
+        for server in servers:
+            server.stop()
+        for server in servers:
+            server.join(timeout=5)
 
 
 @pytest.mark.asyncio
 class TestHealthEndpoints:
     async def test_order_health(self, services):
         async with httpx.AsyncClient() as client:
-            resp = await client.get("http://127.0.0.1:8082/health")
+            resp = await client.get(f"http://127.0.0.1:{services['order']}/health")
             assert resp.status_code == 200
             assert resp.json()["service"] == "order-api"
 
     async def test_inventory_health(self, services):
         async with httpx.AsyncClient() as client:
-            resp = await client.get("http://127.0.0.1:8083/health")
+            resp = await client.get(f"http://127.0.0.1:{services['inventory']}/health")
             assert resp.status_code == 200
 
     async def test_payment_health(self, services):
         async with httpx.AsyncClient() as client:
-            resp = await client.get("http://127.0.0.1:8084/health")
+            resp = await client.get(f"http://127.0.0.1:{services['payment']}/health")
             assert resp.status_code == 200
 
 
@@ -64,7 +104,7 @@ class TestOrderFlow:
         """正常下单流程。"""
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
-                "http://127.0.0.1:8082/orders",
+                f"http://127.0.0.1:{services['order']}/orders",
                 json={
                     "items": [{"product_id": "prod-001", "quantity": 2}],
                     "customer_id": "cust-001",
@@ -80,7 +120,7 @@ class TestOrderFlow:
         async with httpx.AsyncClient(timeout=15.0) as client:
             # 创建
             create_resp = await client.post(
-                "http://127.0.0.1:8082/orders",
+                f"http://127.0.0.1:{services['order']}/orders",
                 json={
                     "items": [{"product_id": "prod-001", "quantity": 1}],
                     "customer_id": "cust-002",
@@ -88,7 +128,7 @@ class TestOrderFlow:
             )
             order_id = create_resp.json()["order_id"]
             # 查询
-            get_resp = await client.get(f"http://127.0.0.1:8082/orders/{order_id}")
+            get_resp = await client.get(f"http://127.0.0.1:{services['order']}/orders/{order_id}")
             assert get_resp.status_code == 200
 
 
@@ -98,44 +138,44 @@ class TestFaultInjection:
         """注入延迟故障。"""
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                "http://127.0.0.1:8083/fault/inject",
+                f"http://127.0.0.1:{services['inventory']}/fault/inject",
                 params={"fault_type": "latency", "latency_ms": 3000},
             )
             assert resp.status_code == 200
             assert resp.json()["fault_type"] == "latency"
             # 清除
-            await client.post("http://127.0.0.1:8083/fault/clear")
+            await client.post(f"http://127.0.0.1:{services['inventory']}/fault/clear")
 
     async def test_inject_5xx(self, services):
         """注入 5xx 故障。"""
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                "http://127.0.0.1:8084/fault/inject",
+                f"http://127.0.0.1:{services['payment']}/fault/inject",
                 params={"fault_type": "error_5xx", "error_rate": 1.0},
             )
             assert resp.status_code == 200
             # 请求应失败
             resp2 = await client.post(
-                "http://127.0.0.1:8084/payments",
+                f"http://127.0.0.1:{services['payment']}/payments",
                 json={"order_id": "test", "amount": 100},
             )
             assert resp2.status_code == 503
             # 清除
-            await client.post("http://127.0.0.1:8084/fault/clear")
+            await client.post(f"http://127.0.0.1:{services['payment']}/fault/clear")
 
     async def test_clear_restores_normal(self, services):
         """清除故障后恢复正常。"""
         async with httpx.AsyncClient(timeout=30.0) as client:
             # 注入
             await client.post(
-                "http://127.0.0.1:8084/fault/inject",
+                f"http://127.0.0.1:{services['payment']}/fault/inject",
                 params={"fault_type": "error_5xx", "error_rate": 1.0},
             )
             # 清除
-            await client.post("http://127.0.0.1:8084/fault/clear")
+            await client.post(f"http://127.0.0.1:{services['payment']}/fault/clear")
             # 验证恢复
             resp = await client.post(
-                "http://127.0.0.1:8084/payments",
+                f"http://127.0.0.1:{services['payment']}/payments",
                 json={"order_id": "test-recover", "amount": 50},
             )
             assert resp.status_code == 201

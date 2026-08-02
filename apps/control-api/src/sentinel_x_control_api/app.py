@@ -11,6 +11,7 @@ Sentinel-X Control API — 主应用入口。
 - GET  /api/incidents/{id}/hypotheses — 假设列表
 - POST /api/incidents/{id}/approvals — 创建审批
 - PUT  /api/incidents/{id}/approvals/{approval_id} — 审批决定
+- GET  /api/approvals — 全局审批队列
 - GET  /api/scenarios — 场景列表
 - POST /api/scenarios/{id}/run — 启动演练
 """
@@ -25,7 +26,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -81,6 +82,7 @@ class IncidentCreate(StrictBaseModel):
 
 class IncidentResponse(BaseModel):
     id: str
+    fingerprint: Optional[str] = None
     status: IncidentStatus
     severity: IncidentSeverity
     alert_name: str
@@ -159,6 +161,7 @@ from dataclasses import dataclass, field
 @dataclass
 class StoredIncident:
     id: str
+    fingerprint: str = ""
     status: IncidentStatus = IncidentStatus.DETECTED
     severity: IncidentSeverity = IncidentSeverity.WARNING
     alert_name: str = ""
@@ -177,13 +180,24 @@ class InMemoryStore:
 
     def __init__(self):
         self._incidents: dict[str, StoredIncident] = {}
+        self._fingerprint_index: dict[str, str] = {}
         self._approvals: dict[str, dict] = {}
         self._scenarios: dict[str, dict] = {}
 
     def create_incident(self, data: IncidentCreate) -> StoredIncident:
+        existing_id = self._fingerprint_index.get(data.alert_source.fingerprint)
+        if existing_id:
+            existing = self._incidents.get(existing_id)
+            if existing and existing.status not in {
+                IncidentStatus.RESOLVED,
+                IncidentStatus.ESCALATED,
+                IncidentStatus.FAILED,
+            }:
+                return existing
         incident_id = str(uuid4())
         incident = StoredIncident(
             id=incident_id,
+            fingerprint=data.alert_source.fingerprint,
             severity=data.alert_source.severity,
             alert_name=data.alert_source.alert_name,
             description=data.alert_source.description,
@@ -193,7 +207,12 @@ class InMemoryStore:
             {"fingerprint": data.alert_source.fingerprint},
         )
         self._incidents[incident_id] = incident
+        self._fingerprint_index[data.alert_source.fingerprint] = incident_id
         return incident
+
+    def find_by_fingerprint(self, fingerprint: str) -> Optional[StoredIncident]:
+        incident_id = self._fingerprint_index.get(fingerprint)
+        return self._incidents.get(incident_id) if incident_id else None
 
     def get_incident(self, incident_id: str) -> Optional[StoredIncident]:
         return self._incidents.get(incident_id)
@@ -261,6 +280,22 @@ class InMemoryStore:
     ) -> None:
         """更新演示事故状态，并留下可回放的状态事件。"""
         old_status = incident.status
+        if new_status == old_status:
+            return
+        allowed = {
+            IncidentStatus.DETECTED: {IncidentStatus.TRIAGING, IncidentStatus.FAILED},
+            IncidentStatus.TRIAGING: {IncidentStatus.DIAGNOSING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+            IncidentStatus.DIAGNOSING: {IncidentStatus.PLAN_PROPOSED, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+            IncidentStatus.PLAN_PROPOSED: {IncidentStatus.AWAITING_APPROVAL, IncidentStatus.VERIFYING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+            IncidentStatus.AWAITING_APPROVAL: {IncidentStatus.EXECUTING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+            IncidentStatus.EXECUTING: {IncidentStatus.VERIFYING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+            IncidentStatus.VERIFYING: {IncidentStatus.RESOLVED, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+            IncidentStatus.RESOLVED: set(),
+            IncidentStatus.ESCALATED: set(),
+            IncidentStatus.FAILED: set(),
+        }
+        if new_status not in allowed[old_status]:
+            raise ValueError(f"非法事故状态迁移: {old_status.value} -> {new_status.value}")
         incident.status = new_status
         incident.updated_at = datetime.now()
         incident.version += 1
@@ -281,7 +316,26 @@ class InMemoryStore:
             return []
         return [e for e in incident.timeline if e.sequence > after_sequence]
 
-    def create_approval(self, incident_id: str, data: ApprovalRequest) -> dict:
+    def create_approval(
+        self,
+        incident_id: str,
+        data: ApprovalRequest,
+        allow_terminal_fixture: bool = False,
+    ) -> dict:
+        incident = self._incidents.get(incident_id)
+        if not incident:
+            raise ValueError("事故不存在")
+        if incident.status == IncidentStatus.DETECTED:
+            self.set_status(incident, IncidentStatus.TRIAGING, "进入审批前检查")
+            self.set_status(incident, IncidentStatus.DIAGNOSING, "完成基础诊断")
+            self.set_status(incident, IncidentStatus.PLAN_PROPOSED, "形成恢复计划")
+        if incident.status == IncidentStatus.PLAN_PROPOSED:
+            self.set_status(incident, IncidentStatus.AWAITING_APPROVAL, "等待人工批准 R1 动作")
+        if incident.status != IncidentStatus.AWAITING_APPROVAL and not (
+            allow_terminal_fixture
+            and incident.status in {IncidentStatus.RESOLVED, IncidentStatus.ESCALATED, IncidentStatus.FAILED}
+        ):
+            raise ValueError(f"当前状态不可创建审批: {incident.status.value}")
         approval_id = str(uuid4())
         approval = {
             "id": approval_id,
@@ -303,9 +357,17 @@ class InMemoryStore:
         self.add_timeline_event(incident_id, "approval.requested", "system", approval)
         return approval
 
-    def decide_approval(self, approval_id: str, decision: ApprovalDecision, decided_by: str = "demo-operator") -> Optional[dict]:
+    def decide_approval(
+        self,
+        approval_id: str,
+        decision: ApprovalDecision,
+        decided_by: str,
+        incident_id: Optional[str] = None,
+    ) -> Optional[dict]:
         approval = self._approvals.get(approval_id)
         if not approval:
+            return None
+        if incident_id is not None and approval["incident_id"] != incident_id:
             return None
         if approval["status"] != "pending":
             return None  # 不可重复决定
@@ -314,6 +376,9 @@ class InMemoryStore:
         if datetime.now() > expires_at:
             approval["status"] = "expired"
             return approval
+        incident = self._incidents.get(approval["incident_id"])
+        if not incident or incident.status != IncidentStatus.AWAITING_APPROVAL:
+            return None
         approval["status"] = "approved" if decision.approved else "rejected"
         approval["decided_at"] = datetime.now().isoformat()
         approval["decided_by"] = decided_by
@@ -324,15 +389,9 @@ class InMemoryStore:
             {"approved": decision.approved, "reason": decision.reason},
         )
 
-        incident = self._incidents.get(approval["incident_id"])
         if incident:
             if decision.approved:
-                if incident.status not in {
-                    IncidentStatus.RESOLVED,
-                    IncidentStatus.ESCALATED,
-                    IncidentStatus.FAILED,
-                }:
-                    self.set_status(incident, IncidentStatus.EXECUTING, "人工批准 R1 动作")
+                self.set_status(incident, IncidentStatus.EXECUTING, "人工批准 R1 动作")
                 self._add_timeline_event(
                     incident,
                     "action.started",
@@ -343,24 +402,14 @@ class InMemoryStore:
                         "mode": "light-fixture",
                     },
                 )
-                if incident.status not in {
-                    IncidentStatus.RESOLVED,
-                    IncidentStatus.ESCALATED,
-                    IncidentStatus.FAILED,
-                }:
-                    self.set_status(incident, IncidentStatus.VERIFYING, "动作完成，开始检查恢复")
+                self.set_status(incident, IncidentStatus.VERIFYING, "动作完成，开始检查恢复")
                 self._add_timeline_event(
                     incident,
                     "action.completed",
                     "action_gateway_fixture",
                     {"status": "succeeded", "before_state": "degraded", "after_state": "healthy"},
                 )
-                if incident.status not in {
-                    IncidentStatus.RESOLVED,
-                    IncidentStatus.ESCALATED,
-                    IncidentStatus.FAILED,
-                }:
-                    self.set_status(incident, IncidentStatus.RESOLVED, "恢复窗口验证通过")
+                self.set_status(incident, IncidentStatus.RESOLVED, "恢复窗口验证通过")
                 incident.resolved_at = incident.resolved_at or datetime.now()
                 self._add_timeline_event(
                     incident,
@@ -369,11 +418,7 @@ class InMemoryStore:
                     {"result": "passed", "window_seconds": 60},
                 )
             else:
-                if incident.status not in {
-                    IncidentStatus.RESOLVED,
-                    IncidentStatus.ESCALATED,
-                    IncidentStatus.FAILED,
-                }:
+                if incident.status not in {IncidentStatus.RESOLVED, IncidentStatus.ESCALATED, IncidentStatus.FAILED}:
                     self.set_status(incident, IncidentStatus.ESCALATED, "人工拒绝恢复动作")
                 self._add_timeline_event(
                     incident,
@@ -504,6 +549,17 @@ app.add_middleware(
 )
 
 
+def _require_role(role: Optional[str], *allowed_roles: str) -> str:
+    """所有会改变控制面状态的端点都显式要求调用方角色。"""
+    normalized = role or "viewer"
+    if normalized not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"角色 {normalized} 无权执行此操作",
+        )
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # 端点
 # ---------------------------------------------------------------------------
@@ -523,6 +579,7 @@ async def create_incident(data: IncidentCreate):
     incident = store.create_incident(data)
     return {
         "id": incident.id,
+        "fingerprint": incident.fingerprint,
         "status": incident.status.value,
         "alert_name": incident.alert_name,
         "created_at": incident.created_at.isoformat(),
@@ -541,6 +598,7 @@ async def list_incidents(
         items=[
             IncidentResponse(
                 id=inc.id,
+                fingerprint=inc.fingerprint,
                 status=inc.status,
                 severity=inc.severity,
                 alert_name=inc.alert_name,
@@ -566,6 +624,7 @@ async def get_incident(incident_id: str):
         raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
     return IncidentResponse(
         id=incident.id,
+        fingerprint=incident.fingerprint,
         status=incident.status,
         severity=incident.severity,
         alert_name=incident.alert_name,
@@ -607,8 +666,13 @@ async def get_timeline(
 # ---- 审批 ----
 
 @app.post("/api/incidents/{incident_id}/approvals", status_code=status.HTTP_201_CREATED)
-async def request_approval(incident_id: str, data: ApprovalRequest):
+async def request_approval(
+    incident_id: str,
+    data: ApprovalRequest,
+    role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
+):
     """创建审批请求。"""
+    _require_role(role, "planner", "scenario_operator", "system")
     incident = store.get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
@@ -616,17 +680,26 @@ async def request_approval(incident_id: str, data: ApprovalRequest):
         raise HTTPException(status_code=400, detail="R2 操作在 MVP 中禁用，请升级人工处理")
     if data.risk_level == RiskLevel.R3:
         raise HTTPException(status_code=400, detail="R3 操作永久禁止")
-    approval = store.create_approval(incident_id, data)
+    try:
+        approval = store.create_approval(incident_id, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return approval
 
 
 @app.put("/api/incidents/{incident_id}/approvals/{approval_id}")
-async def decide_approval(incident_id: str, approval_id: str, decision: ApprovalDecision):
+async def decide_approval(
+    incident_id: str,
+    approval_id: str,
+    decision: ApprovalDecision,
+    role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
+):
     """审批决定。"""
+    decided_by = _require_role(role, "approver")
     incident = store.get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
-    result = store.decide_approval(approval_id, decision)
+    result = store.decide_approval(approval_id, decision, decided_by=decided_by, incident_id=incident_id)
     if not result:
         raise HTTPException(status_code=404, detail=f"审批 {approval_id} 不存在或已决定")
     return result
@@ -645,6 +718,42 @@ async def list_approvals(incident_id: str):
     return {"items": approvals}
 
 
+@app.get("/api/approvals")
+async def list_all_approvals(
+    status_filter: Optional[str] = Query(default="pending", alias="status"),
+):
+    """全局审批队列，默认只返回仍需人工处理的请求。"""
+    allowed_statuses = {"pending", "approved", "rejected", "expired", "all"}
+    if status_filter not in allowed_statuses:
+        raise HTTPException(status_code=400, detail="不支持的审批状态筛选")
+
+    items = []
+    for approval in store._approvals.values():
+        if status_filter != "all" and approval["status"] != status_filter:
+            continue
+        incident = store.get_incident(approval["incident_id"])
+        if not incident:
+            continue
+        items.append({
+            **approval,
+            "incident": {
+                "id": incident.id,
+                "status": incident.status.value,
+                "severity": incident.severity.value,
+                "alert_name": incident.alert_name,
+                "description": incident.description,
+                "updated_at": incident.updated_at.isoformat(),
+            },
+        })
+
+    items.sort(key=lambda item: (
+        item["status"] != "pending",
+        item["expires_at"],
+        item["created_at"],
+    ))
+    return {"items": items, "total": len(items)}
+
+
 # ---- 场景 ----
 
 @app.get("/api/scenarios")
@@ -655,8 +764,12 @@ async def list_scenarios():
 
 
 @app.post("/api/scenarios/{scenario_id}/run", status_code=status.HTTP_202_ACCEPTED)
-async def run_scenario(scenario_id: str):
+async def run_scenario(
+    scenario_id: str,
+    role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
+):
     """启动演练场景。"""
+    _require_role(role, "scenario_operator")
     scenario = store._scenarios.get(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"场景 {scenario_id} 不存在")
@@ -675,11 +788,19 @@ async def run_scenario(scenario_id: str):
         if scenario["category"] in {"database", "kubernetes", "resource"}
         else IncidentSeverity.WARNING
     )
+    fingerprint = f"exercise:{scenario_id}"
+    existing = store.find_by_fingerprint(fingerprint)
+    if existing and existing.status not in {
+        IncidentStatus.RESOLVED,
+        IncidentStatus.ESCALATED,
+        IncidentStatus.FAILED,
+    }:
+        raise HTTPException(status_code=409, detail="该场景已有活动演练")
     incident = store.create_incident(
         IncidentCreate(
             alert_source=AlertSource(
                 alertmanager_id=f"scenario:{scenario_id}",
-                fingerprint=f"exercise:{uuid4()}",
+                fingerprint=fingerprint,
                 alert_name=f"{target} / {scenario['name']}",
                 severity=severity,
                 description=scenario["description"],
@@ -778,21 +899,30 @@ async def run_scenario(scenario_id: str):
 
 
 @app.get("/api/incidents/{incident_id}/stream")
-async def stream_incident(incident_id: str):
+async def stream_incident(
+    incident_id: str,
+    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+):
     """SSE 实时推送事故更新。"""
     incident = store.get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
+    try:
+        initial_sequence = int(last_event_id) if last_event_id else 0
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Last-Event-ID 必须是时间线序号") from exc
+    if initial_sequence < 0:
+        raise HTTPException(status_code=400, detail="Last-Event-ID 不能为负数")
 
     async def event_generator():
-        last_seq = 0
+        last_seq = initial_sequence
         # 先发送当前状态
         yield f"data: {json.dumps({'type': 'status', 'status': incident.status.value})}\n\n"
         # 然后轮询新事件（MVP 简化实现，正式版用 outbox + dispatcher）
         for _ in range(300):  # 最多 5 分钟
             events = store.get_timeline(incident_id, last_seq)
             for event in events:
-                yield f"data: {json.dumps({'type': 'timeline_event', 'event': {
+                yield f"id: {event.sequence}\nevent: timeline_event\ndata: {json.dumps({'type': 'timeline_event', 'event': {
                     'id': event.id,
                     'sequence': event.sequence,
                     'event_type': event.event_type,
@@ -976,11 +1106,22 @@ async def seed_demo_data():
                     plan_hash=_compute_plan_hash(runbook_ref, target, parameters, incident.id),
                     hypothesis_id=f"hyp-{incident.id[:8]}",
                 ),
+                allow_terminal_fixture=True,
             )
-            store.decide_approval(
-                approval["id"],
-                ApprovalDecision(approved=True, reason="演示数据中的已验证恢复"),
-                decided_by="demo-operator",
+            # 已解决事故只用于展示历史审批，不再次触发动作；直接写入只读演示记录。
+            approval.update(
+                {
+                    "status": "approved",
+                    "decided_at": datetime.now().isoformat(),
+                    "decided_by": "demo-operator",
+                    "decision_reason": "演示数据中的已验证恢复",
+                }
+            )
+            store.add_timeline_event(
+                incident.id,
+                "approval.decided",
+                "approver:demo-operator",
+                {"approved": True, "reason": "演示数据中的已验证恢复", "fixture": True},
             )
 
         created.append(incident.id)

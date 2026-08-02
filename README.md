@@ -33,8 +33,8 @@ Sentinel-X 是一个面向隔离演练环境的 AI 事故指挥平台原型。�
 | 事故详情 | 已实现 | 证据、根因假设、审批记录、SSE 时间线和恢复事件 |
 | 故障演练目录 | 已实现 | 6 个固定场景，启动后创建可回放事故 |
 | 诊断工具边界 | 已实现并测试 | Prometheus、Loki、Tempo、Kubernetes 只读工具的参数约束 |
-| 人工审批 | 已实现并测试 | R1 计划展示、确认弹层、审批后 light-fixture 恢复链路 |
-| Action Gateway | 原型已实现 | Runbook 白名单、参数校验、plan hash、过期和幂等校验 |
+| 人工审批 | light 原型已测试 | 角色门控、完整计划核对、理由化拒绝和 fixture 时间线；不是生产身份认证 |
+| Action Gateway | light 原型已测试 | fail-closed、HMAC 审批凭证、管理员令牌、Runbook/目标/参数/hash/过期和内存并发幂等；不执行真实 Kubernetes 动作 |
 | 固定评测 | 设计中 | 评测 runner 和指标定义存在，完整 benchmark 尚未发布 |
 | Kubernetes / OTel 全栈 | proposed | 清单和架构草案存在，尚未作为完成能力声明 |
 
@@ -100,6 +100,15 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 控制台通过 Vite proxy 访问 `http://127.0.0.1:8000`。如果端口被占用，请先停止占用项目端口的进程，再按文档启动，避免把未知服务误当成演练环境。
 
+控制台默认以 `viewer` 只读角色启动。需要启动演练时，在启动 Vite 前设置本地开发角色：
+
+```powershell
+$env:VITE_SENTINEL_ROLE = 'scenario_operator'
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+审批操作使用 `approver`；这些环境变量只用于本地 light 演练展示，不能当作生产身份认证。
+
 ## 验证
 
 根目录快速测试：
@@ -113,6 +122,7 @@ python -m pytest -v --tb=short --asyncio-mode=auto
 ```powershell
 Set-Location apps/web-console
 npm run build
+npm run lint
 ```
 
 Action Gateway 和诊断边界测试：
@@ -121,7 +131,7 @@ Action Gateway 和诊断边界测试：
 python -m pytest apps/action-gateway/tests packages/diagnostics/tests -v --tb=short --asyncio-mode=auto
 ```
 
-演练微服务测试会启动本地端口 `8082`、`8083`、`8084`，建议单独执行：
+演练微服务测试使用动态回环端口、health readiness 和可靠 teardown，建议单独执行：
 
 ```powershell
 python -m pytest demo/services/tests/test_services.py -v --tb=short --asyncio-mode=auto
@@ -135,6 +145,8 @@ python -m pytest demo/services/tests/test_services.py -v --tb=short --asyncio-mo
 - 诊断默认只读；日志、Trace、告警和工具结果都被视为不可信输入。
 - 禁止任意 Shell、`kubectl`、`pods/exec`、Secrets 读取、`cluster-admin` 和跨 namespace 写操作。
 - MVP 的 R1 动作只有登记过的 Deployment 重启和限定范围扩容，并且必须人工批准。
+- light Action Gateway 默认 kill switch 开启；未配置 `SENTINEL_APPROVAL_TOKEN_SECRET` 或管理员令牌时拒绝受控动作。
+- Control API 的 `X-Sentinel-Role` 是本地演示能力门控，不是浏览器会话、OIDC 或服务身份认证。
 - R2 数据库/跨服务高风险动作在 MVP 中禁用，R3 永久禁止。
 - Action Gateway 不持有模型密钥，模型组件不持有执行器写权限。
 

@@ -1,8 +1,12 @@
+.page {
+  display: grid;
+  gap: 16px;
+}
+
 .back {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-bottom: 16px;
   font-size: 14px;
 }
 .back:hover { text-decoration: underline; }
@@ -10,7 +14,10 @@
 .loading, .error { text-align: center; padding: 60px 0; }
 .error { color: var(--color-danger); }
 
-.header { margin-bottom: 24px; }
+.header { margin-bottom: 0; }
+.headerTopline { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.eyebrow { color: var(--color-accent); font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.11em; }
+.freshness { color: var(--color-text-dim); font-family: var(--font-mono); font-size: 10px; }
 .title { font-size: 24px; font-weight: 600; }
 
 .meta {
@@ -21,6 +28,7 @@
   color: var(--color-text-muted);
   align-items: center;
 }
+.streamBadge { padding: 2px 7px; border: 1px solid var(--color-border); color: var(--color-text-dim); font-family: var(--font-mono); font-size: 10px; }
 
 .statusBadge {
   padding: 2px 10px;
@@ -45,7 +53,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 20px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .cardTitle {
@@ -60,6 +68,9 @@
   letter-spacing: 0.5px;
 }
 
+.cardIntro { margin: -3px 0 14px; color: var(--color-text-muted); font-size: 12px; line-height: 1.55; }
+.inlineError { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 14px; padding: 10px 12px; border: 1px solid rgba(255, 113, 109, 0.35); color: var(--color-danger); background: var(--color-danger-soft); font-size: 12px; }
+
 .empty { color: var(--color-text-muted); font-size: 14px; }
 
 .summaryGrid {
@@ -68,7 +79,7 @@
   gap: 16px;
 }
 
-.summaryGrid .card { margin-bottom: 16px; }
+.summaryGrid .card { margin-bottom: 0; }
 .diagnosisCard { border-top: 2px solid var(--color-accent); }
 .diagnosisTitle { display: flex; align-items: center; gap: 7px; color: var(--color-accent); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; }
 .diagnosisStatement { display: block; margin-top: 18px; color: var(--color-text); font-size: 14px; line-height: 1.55; }
@@ -142,6 +153,7 @@
   gap: 8px;
   margin-top: 12px;
 }
+.readOnlyNotice { color: var(--color-text-muted); font-size: 12px; }
 
 .btnApprove, .btnReject {
   min-height: 44px;
@@ -186,15 +198,18 @@
 
 /* ---- 证据摘要 ---- */
 
+.analysisGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.evidenceList,
+.hypothesisList { display: grid; gap: 10px; }
+
 .evidenceItem {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--color-border);
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
   font-size: 13px;
 }
-.evidenceItem:last-child { border-bottom: none; }
+.evidenceItemTopline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
 .evidenceSource {
   font-family: var(--font-mono);
@@ -208,40 +223,43 @@
   text-align: center;
 }
 
+.evidenceRef { min-width: 0; color: var(--color-text-dim); font-family: var(--font-mono); font-size: 10px; overflow-wrap: anywhere; text-align: right; }
 .evidenceSummary {
+  margin-top: 9px;
   color: var(--color-text);
   line-height: 1.4;
 }
+.evidenceTime { display: block; margin-top: 9px; color: var(--color-text-dim); font-family: var(--font-mono); font-size: 10px; }
 
 /* ---- 假设摘要 ---- */
 
 .hypothesisItem {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--color-border);
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
   font-size: 13px;
 }
-.hypothesisItem:last-child { border-bottom: none; }
+.hypothesisLead { display: flex; align-items: flex-start; gap: 10px; }
+.hypothesisLead strong { color: var(--color-text); font-size: 13px; line-height: 1.5; }
+.hypothesisIndex { width: 22px; height: 22px; display: grid; flex: 0 0 auto; place-items: center; color: var(--color-accent); border: 1px solid var(--color-accent); font-family: var(--font-mono); font-size: 10px; }
 
 .hypothesisMeta {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 7px 12px;
   align-items: center;
-}
-
-.hypothesisCategory {
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(188,140,255,0.12);
-  color: #bc8cff;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.hypothesisConfidence {
+  margin-top: 12px;
+  color: var(--color-text-muted);
   font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--color-text);
+  font-size: 10px;
 }
+
+.hypothesisMeta span { padding-right: 12px; border-right: 1px solid var(--color-border); }
+.hypothesisMeta b { color: var(--color-success); font-weight: 500; }
+.hypothesisEvidence { display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--color-border); }
+.hypothesisEvidence div { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 10px; }
+.hypothesisEvidence span { color: var(--color-text-dim); font-family: var(--font-mono); font-size: 10px; }
+.hypothesisEvidence strong { min-width: 0; color: var(--color-text-muted); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 
 /* ---- 时间线 ---- */
 
@@ -293,6 +311,11 @@
   margin-left: auto;
 }
 
+.timelineSummary { margin-top: 6px; color: var(--color-text-muted); font-size: 12px; line-height: 1.5; }
+.timelineDetails { margin-top: 8px; border-top: 1px solid var(--color-border); }
+.timelineDetails summary { padding-top: 8px; color: var(--color-text-dim); cursor: pointer; font-family: var(--font-mono); font-size: 10px; list-style-position: inside; }
+.timelineDetails summary:hover { color: var(--color-accent); }
+
 .timelinePayload {
   margin-top: 6px;
   padding: 8px 12px;
@@ -324,7 +347,10 @@
   background: var(--color-surface);
   padding: 20px;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  position: relative;
 }
+.modalClose { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 30px; height: 30px; border: 0; color: var(--color-text-muted); background: transparent; }
+.modalClose:hover { color: var(--color-text); background: var(--color-surface-raised); }
 
 .confirmTitle {
   margin-bottom: 16px;
@@ -358,6 +384,13 @@
   overflow-wrap: anywhere;
 }
 
+.confirmParameters { margin-bottom: 18px; }
+.confirmParameters > span { color: var(--color-text-muted); font-size: 13px; }
+.confirmParameters pre { max-height: 140px; margin-top: 7px; padding: 10px 12px; overflow: auto; color: var(--color-text-muted); background: var(--color-bg); font-size: 11px; }
+.rejectForm { display: grid; gap: 12px; margin-bottom: 18px; }
+.rejectForm label { display: grid; gap: 6px; color: var(--color-text-muted); font-size: 12px; }
+.rejectForm select, .rejectForm textarea { width: 100%; border: 1px solid var(--color-border-strong); border-radius: var(--radius); padding: 9px 10px; color: var(--color-text); background: var(--color-bg); font: inherit; }
+
 .confirmActions {
   display: flex;
   justify-content: flex-end;
@@ -365,6 +398,8 @@
 }
 
 @media (max-width: 760px) {
+  .headerTopline { align-items: flex-start; flex-direction: column; gap: 6px; }
+
   .summaryGrid {
     grid-template-columns: 1fr;
     gap: 0;
@@ -381,6 +416,10 @@
 
   .card {
     padding: 16px;
+  }
+
+  .analysisGrid {
+    grid-template-columns: 1fr;
   }
 
   .approvalActions,
@@ -401,4 +440,12 @@
   .timelineTime {
     margin-left: 0;
   }
+
+  .evidenceItemTopline {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .evidenceRef { text-align: left; }
 }

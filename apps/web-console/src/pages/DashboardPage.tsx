@@ -16,6 +16,7 @@ import {
   TimerReset,
   Zap,
 } from 'lucide-react'
+import { apiFetch } from '../lib/api'
 import styles from './DashboardPage.module.css'
 
 interface Incident {
@@ -74,7 +75,7 @@ interface ServiceNodeProps {
   role: string
   metric: string
   detail: string
-  tone: 'healthy' | 'watch' | 'degraded'
+  tone: 'healthy' | 'watch' | 'degraded' | 'unknown'
   icon: typeof Server
 }
 
@@ -83,7 +84,7 @@ function ServiceNode({ name, role, metric, detail, tone, icon: Icon }: ServiceNo
     <div className={`${styles.serviceNode} ${styles[`node_${tone}`]}`}>
       <div className={styles.nodeTopline}>
         <span className={styles.nodeIcon}><Icon size={16} aria-hidden="true" /></span>
-        <span className={styles.nodeStatus}><CircleDot size={10} fill="currentColor" aria-hidden="true" /> {tone === 'healthy' ? 'healthy' : tone === 'watch' ? 'watch' : 'degraded'}</span>
+        <span className={styles.nodeStatus}><CircleDot size={10} fill="currentColor" aria-hidden="true" /> {tone === 'healthy' ? 'healthy' : tone === 'watch' ? 'watch' : tone === 'degraded' ? 'degraded' : 'unknown'}</span>
       </div>
       <strong>{name}</strong>
       <span className={styles.nodeRole}>{role}</span>
@@ -111,8 +112,7 @@ export function DashboardPage() {
       const params = new URLSearchParams({ limit: '20' })
       if (statusFilter !== 'all') params.set('status', statusFilter)
       if (cursor) params.set('cursor', cursor)
-      const res = await fetch(`/api/incidents?${params.toString()}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const res = await apiFetch(`/api/incidents?${params.toString()}`)
       const data = await res.json()
       setIncidents(data.items || [])
       setNextCursor(data.next_cursor || null)
@@ -150,8 +150,7 @@ export function DashboardPage() {
   const handleSeed = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/demo/seed', { method: 'POST' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await apiFetch('/api/demo/seed', { method: 'POST' })
       setSeeded(true)
       setCursor(null)
       setCursorStack([])
@@ -162,11 +161,12 @@ export function DashboardPage() {
     }
   }
 
+  const hasData = !loading && !error
   const activeCount = incidents.filter(i => !['RESOLVED', 'ESCALATED', 'FAILED'].includes(i.status)).length
   const resolvedCount = incidents.filter(i => i.status === 'RESOLVED').length
   const criticalCount = incidents.filter(i => i.severity === 'critical').length
   const approvalCount = incidents.filter(i => i.status === 'AWAITING_APPROVAL').length
-  const topologyTone = activeCount > 0 ? 'degraded' : 'healthy'
+  const topologyTone: ServiceNodeProps['tone'] = !hasData ? 'unknown' : activeCount > 0 ? 'degraded' : 'healthy'
 
   return (
     <div className={styles.page}>
@@ -193,22 +193,22 @@ export function DashboardPage() {
       <section className={styles.metricStrip} aria-label="事故状态摘要">
         <div className={styles.metricItem}>
           <span><Activity size={14} aria-hidden="true" /> 活跃事故</span>
-          <strong>{activeCount}</strong>
+          <strong>{hasData ? activeCount : '—'}</strong>
           <small>当前结果集</small>
         </div>
         <div className={styles.metricItem}>
           <span><AlertTriangle size={14} aria-hidden="true" /> 待审批</span>
-          <strong className={approvalCount > 0 ? styles.metricAccent : ''}>{approvalCount}</strong>
+          <strong className={hasData && approvalCount > 0 ? styles.metricAccent : ''}>{hasData ? approvalCount : '—'}</strong>
           <small>需要值班工程师确认</small>
         </div>
         <div className={styles.metricItem}>
           <span><ShieldCheck size={14} aria-hidden="true" /> 严重事故</span>
-          <strong className={criticalCount > 0 ? styles.metricDanger : ''}>{criticalCount}</strong>
+          <strong className={hasData && criticalCount > 0 ? styles.metricDanger : ''}>{hasData ? criticalCount : '—'}</strong>
           <small>critical severity</small>
         </div>
         <div className={styles.metricItem}>
           <span><CheckCircle2 size={14} aria-hidden="true" /> 已恢复</span>
-          <strong className={styles.metricSuccess}>{resolvedCount}</strong>
+          <strong className={styles.metricSuccess}>{hasData ? resolvedCount : '—'}</strong>
           <small>通过恢复窗口验证</small>
         </div>
       </section>
@@ -223,15 +223,15 @@ export function DashboardPage() {
             <span className={styles.panelMeta}><GitBranch size={14} aria-hidden="true" /> 3 services / 1 data path</span>
           </div>
           <div className={styles.topology} aria-label="订单、库存、支付服务拓扑">
-            <ServiceNode name="order-api" role="入口 / checkout" metric={topologyTone === 'healthy' ? '99.98%' : '12.4%'} detail="success rate" tone={topologyTone} icon={Server} />
+            <ServiceNode name="order-api" role="入口 / checkout" metric={!hasData ? '—' : topologyTone === 'healthy' ? '99.98%' : '12.4%'} detail={hasData ? 'success rate' : 'unavailable'} tone={topologyTone} icon={Server} />
             <ChevronRight className={styles.topologyArrow} size={22} aria-hidden="true" />
-            <ServiceNode name="inventory-api" role="dependency / stock" metric={topologyTone === 'healthy' ? '180 ms' : '3.2 s'} detail="p99 latency" tone={activeCount > 0 ? 'watch' : 'healthy'} icon={Database} />
+            <ServiceNode name="inventory-api" role="dependency / stock" metric={!hasData ? '—' : topologyTone === 'healthy' ? '180 ms' : '3.2 s'} detail={hasData ? 'p99 latency' : 'unavailable'} tone={!hasData ? 'unknown' : activeCount > 0 ? 'watch' : 'healthy'} icon={Database} />
             <ChevronRight className={styles.topologyArrow} size={22} aria-hidden="true" />
-            <ServiceNode name="payment-api" role="dependency / charge" metric={topologyTone === 'healthy' ? '0.3%' : '12.0%'} detail="error rate" tone={activeCount > 0 ? 'degraded' : 'healthy'} icon={Zap} />
+            <ServiceNode name="payment-api" role="dependency / charge" metric={!hasData ? '—' : topologyTone === 'healthy' ? '0.3%' : '12.0%'} detail={hasData ? 'error rate' : 'unavailable'} tone={!hasData ? 'unknown' : activeCount > 0 ? 'degraded' : 'healthy'} icon={Zap} />
           </div>
           <div className={styles.topologyFooter}>
             <span><span className={styles.legendDot} /> request path</span>
-            <span><TimerReset size={14} aria-hidden="true" /> last signal 12s ago</span>
+            <span><TimerReset size={14} aria-hidden="true" /> {hasData ? 'last signal 12s ago' : 'signal unavailable'}</span>
             <span>profile: <b>light</b></span>
           </div>
         </section>
@@ -262,9 +262,9 @@ export function DashboardPage() {
             </div>
           )}
           <div className={styles.signalRows}>
-            <div><span>Telemetry</span><b className={styles.okText}>connected</b></div>
-            <div><span>Diagnostic tools</span><b className={styles.okText}>read-only</b></div>
-            <div><span>Action Gateway</span><b className={styles.warnText}>approval gated</b></div>
+            <div><span>Telemetry</span><b className={error ? styles.warnText : styles.okText}>{error ? 'unavailable' : 'connected'}</b></div>
+            <div><span>Diagnostic tools</span><b className={error ? styles.warnText : styles.okText}>{error ? 'unavailable' : 'read-only'}</b></div>
+            <div><span>Action Gateway</span><b className={styles.warnText}>{error ? 'unknown' : 'approval gated'}</b></div>
           </div>
         </section>
       </div>
@@ -299,6 +299,12 @@ export function DashboardPage() {
 
         {loading ? (
           <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} />加载事故队列</div>
+        ) : error ? (
+          <div className={styles.emptyState} role="status">
+            <AlertTriangle size={24} aria-hidden="true" />
+            <strong>事故队列不可用</strong>
+            <span>当前没有可靠数据，不显示“暂无事故”。请确认 Control API 已启动。</span>
+          </div>
         ) : incidents.length === 0 ? (
           <div className={styles.emptyState}>
             <CircleDot size={24} aria-hidden="true" />

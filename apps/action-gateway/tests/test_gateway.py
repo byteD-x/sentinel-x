@@ -3,6 +3,8 @@ Action Gateway 测试 — 覆盖完整校验链和安全边界。
 """
 
 import hashlib
+import hmac
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 import pytest
@@ -17,6 +19,8 @@ def reset_state():
     store._executions.clear()
     store._idempotency_keys.clear()
     gate.kill_switch = False
+    gate.approval_token_secret = "test-approval-secret"
+    gate.admin_token = "test-admin-token"
 
 
 @pytest.fixture
@@ -46,20 +50,25 @@ def _make_request(
     if parameters is None:
         parameters = {"reason": "测试"}
     plan_hash = _make_plan_hash(runbook_ref, target, parameters, incident_id)
-    return {
+    data = {
         "runbook_ref": runbook_ref,
         "target": target,
         "parameters": parameters,
         "idempotency_key": f"test-key-{hashlib.sha256(str(hash(str(parameters))).encode()).hexdigest()[:12]}",
         "plan_hash": plan_hash,
         "approval_id": "approval-test-001",
-        "approval_token": "test-approval-token-001",
+        "approval_token": "placeholder-token-001",
         "approval_expires_at": (
             datetime.now(timezone.utc) + timedelta(minutes=30)
         ).isoformat(),
         "incident_id": incident_id,
         "audience": "sentinel-action-gateway",
     }
+    canonical = "|".join((data["approval_id"], data["incident_id"], data["plan_hash"], data["audience"]))
+    data["approval_token"] = hmac.new(
+        gate.approval_token_secret.encode(), canonical.encode(), hashlib.sha256
+    ).hexdigest()
+    return data
 
 
 @pytest.mark.asyncio
@@ -115,9 +124,31 @@ class TestRejections:
     async def test_wrong_plan_hash_rejected(self, client):
         data = _make_request()
         data["plan_hash"] = "0000000000000000"  # 错误的 hash
+        canonical = "|".join((data["approval_id"], data["incident_id"], data["plan_hash"], data["audience"]))
+        data["approval_token"] = hmac.new(
+            gate.approval_token_secret.encode(), canonical.encode(), hashlib.sha256
+        ).hexdigest()
         resp = await client.post("/api/actions", json=data)
         assert resp.status_code == 400
         assert "hash" in resp.json()["detail"].lower()
+
+    async def test_invalid_approval_token_rejected(self, client):
+        data = _make_request()
+        data["approval_token"] = "invalid-token-000000"
+        resp = await client.post("/api/actions", json=data)
+        assert resp.status_code == 400
+        assert "审批凭证" in resp.json()["detail"]
+
+    async def test_invalid_audience_rejected(self, client):
+        data = _make_request()
+        data["audience"] = "other-service"
+        canonical = "|".join((data["approval_id"], data["incident_id"], data["plan_hash"], data["audience"]))
+        data["approval_token"] = hmac.new(
+            gate.approval_token_secret.encode(), canonical.encode(), hashlib.sha256
+        ).hexdigest()
+        resp = await client.post("/api/actions", json=data)
+        assert resp.status_code == 400
+        assert "audience" in resp.json()["detail"]
 
     async def test_unknown_field_rejected(self, client):
         data = _make_request()
@@ -159,17 +190,38 @@ class TestKillSwitch:
 
     async def test_kill_switch_blocks_actions(self, client):
         # 激活 Kill Switch
-        await client.post("/api/admin/kill-switch?activate=true")
+        await client.post(
+            "/api/admin/kill-switch?activate=true",
+            headers={"X-Sentinel-Admin-Token": gate.admin_token},
+        )
         resp = await client.post("/api/actions", json=_make_request())
         assert resp.status_code == 400
         assert "Kill Switch" in resp.json()["detail"]
 
     async def test_kill_switch_deactivate_restores(self, client):
         # 激活再关闭
-        await client.post("/api/admin/kill-switch?activate=true")
-        await client.post("/api/admin/kill-switch?activate=false")
+        await client.post(
+            "/api/admin/kill-switch?activate=true",
+            headers={"X-Sentinel-Admin-Token": gate.admin_token},
+        )
+        await client.post(
+            "/api/admin/kill-switch?activate=false",
+            headers={"X-Sentinel-Admin-Token": gate.admin_token},
+        )
         resp = await client.post("/api/actions", json=_make_request())
         assert resp.status_code == 202
+
+    async def test_kill_switch_requires_admin_token(self, client):
+        resp = await client.post("/api/admin/kill-switch?activate=true")
+        assert resp.status_code == 403
+
+    async def test_concurrent_same_idempotency_key_has_one_winner(self, client):
+        data = _make_request()
+        responses = await asyncio.gather(
+            client.post("/api/actions", json=data),
+            client.post("/api/actions", json=data),
+        )
+        assert sorted(response.status_code for response in responses) == [202, 400]
 
 
 @pytest.mark.asyncio
@@ -190,3 +242,10 @@ class TestHealth:
         resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["actions_enabled"] is True
+
+    async def test_health_defaults_fail_closed(self, client):
+        gate.kill_switch = True
+        gate.approval_token_secret = None
+        resp = await client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["actions_enabled"] is False

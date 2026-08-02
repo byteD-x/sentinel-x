@@ -60,10 +60,23 @@
 .category { padding: 3px 7px; border: 1px solid var(--color-border); color: var(--color-text-muted); font-family: var(--font-mono); font-size: 10px; white-space: nowrap; }
 .scenarioBody h2 { max-width: 680px; margin-top: 9px; color: var(--color-text-muted); font-size: 13px; font-weight: 450; }
 .scenarioMeta { display: flex; flex-wrap: wrap; gap: 12px 18px; margin-top: 16px; color: var(--color-text-dim); font-family: var(--font-mono); font-size: 10px; }
+.preflightLine { margin-top: 10px; color: var(--color-text-dim); font-family: var(--font-mono); font-size: 10px; }
 .runButton { min-width: 116px; display: inline-flex; align-items: center; justify-content: center; align-self: center; gap: 7px; margin: 18px 18px 18px 8px; padding: 0 14px; border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-accent); background: transparent; font-size: 12px; font-weight: 650; transition: background 160ms ease, color 160ms ease, opacity 160ms ease; }
 .runButton:hover:not(:disabled) { color: var(--color-bg); background: var(--color-accent); }
 .runButton:disabled { cursor: not-allowed; opacity: 0.55; }
 .empty { min-height: 220px; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--color-text-muted); font-size: 12px; }
+.preflightBackdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: rgba(1,4,9,.72); }
+.preflightDialog { width: min(500px,100%); padding: 22px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); box-shadow: 0 18px 60px rgba(0,0,0,.35); }
+.preflightDialog h2 { color: var(--color-text); font-size: 18px; }
+.preflightDialog p { margin-top: 8px; color: var(--color-text-muted); font-size: 12px; }
+.preflightDialog dl { display: grid; gap: 10px; margin-top: 18px; }
+.preflightDialog dl div { display: grid; grid-template-columns: 120px minmax(0,1fr); gap: 12px; }
+.preflightDialog dt { color: var(--color-text-muted); font-size: 12px; }
+.preflightDialog dd { color: var(--color-text); font: 12px var(--font-mono); overflow-wrap: anywhere; }
+.preflightActions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
+.cancelButton, .confirmButton { min-height: 38px; padding: 0 14px; border-radius: var(--radius); font-size: 12px; font-weight: 650; }
+.cancelButton { border: 1px solid var(--color-border-strong); color: var(--color-text-muted); background: transparent; }
+.confirmButton { border: 1px solid var(--color-accent); color: var(--color-bg); background: var(--color-accent); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

@@ -209,6 +209,8 @@ data: {"schema_version":"1.0","incident_id":"inc_example","sequence":184,"event_
 
 approver 查看 `PENDING` 请求，可按过期时间、risk 和 service 筛选。
 
+当前 light/prototype 实现提供 `GET /api/approvals?status=pending|all|approved|rejected|expired`，返回审批记录及其关联事故摘要，用于 Web Console 审批队列。该端点尚未实现正式契约要求的认证、ETag、CSRF 和数据库持久化，不能视为 full profile 审批 API。
+
 ### `GET /api/v1/approval-requests/{id}`
 
 返回规范 plan、目标、before state、证据摘要、policy/Runbook 版本、过期和 capabilities。响应带 ETag。

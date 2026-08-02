@@ -35,13 +35,14 @@ class WorkerRunner:
     """
     Worker 运行器。
 
-    在 Temporal Server 可用时，连接并注册 Workflow/Activity。
-    当 Temporal Server 不可用时，使用本地模式运行 Workflow 测试。
+    `light` profile 只运行本地 Workflow fixture。
+    `full` profile 不能降级：当前尚未实现真实 Temporal Worker 注册，因此必须拒绝启动。
     """
 
     def __init__(self):
         self._running = False
         self._shutdown_event = asyncio.Event()
+        self.profile = os.getenv("SENTINEL_PROFILE", "light")
 
     async def start(self) -> None:
         """启动 Worker。"""
@@ -54,17 +55,17 @@ class WorkerRunner:
 
         self._running = True
 
-        # 尝试连接 Temporal Server
-        temporal_available = await self._check_temporal()
-
-        if temporal_available:
-            await self._start_temporal_worker()
-        else:
-            logger.warning(
-                "Temporal Server 不可用，Worker 以本地模式运行。"
-                "运行: temporal server start-dev 启动 Temporal 开发服务器。"
-            )
+        if self.profile == "light":
+            logger.warning("light profile：运行本地 Workflow fixture，不连接 Temporal Server。")
             await self._start_local_mode()
+            return
+
+        if self.profile != "full":
+            raise RuntimeError(f"不支持的 SENTINEL_PROFILE: {self.profile}")
+
+        if not await self._check_temporal():
+            raise RuntimeError("full profile 需要可用的 Temporal Server；禁止降级为本地 fixture")
+        await self._start_temporal_worker()
 
     async def _check_temporal(self) -> bool:
         """检查 Temporal Server 是否可用。"""
@@ -82,16 +83,11 @@ class WorkerRunner:
             return False
 
     async def _start_temporal_worker(self) -> None:
-        """启动 Temporal Worker（注册 Workflow/Activity）。"""
-        import temporalio.worker
-
-        # 当连接 Temporal 时，在此注册真实的 Workflow 和 Activity
-        logger.info("Temporal Worker 已连接，等待任务...")
-        try:
-            while self._running:
-                await asyncio.sleep(5)
-        except asyncio.CancelledError:
-            pass
+        """拒绝运行尚未注册 Workflow/Activity 的伪 Temporal Worker。"""
+        raise RuntimeError(
+            "full profile Temporal Worker 注册尚未实现；"
+            "不得以空循环替代持久化 Workflow 执行"
+        )
 
     async def _start_local_mode(self) -> None:
         """本地模式：直接运行 Workflow 进行测试。"""

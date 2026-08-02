@@ -135,6 +135,8 @@
   box-shadow: 0 0 0 4px var(--color-success-soft);
 }
 
+.statusDotOffline { background: var(--color-danger); box-shadow: 0 0 0 4px var(--color-danger-soft); }
+
 .environmentStatus div {
   display: grid;
   gap: 2px;
@@ -184,6 +186,11 @@
   color: var(--color-text-muted);
   font-size: 11px;
 }
+
+.streamOnline { color: var(--color-success); }
+.streamChecking { color: var(--color-warning); }
+.streamOffline { color: var(--color-danger); }
+.roleBadge { margin-left: 8px; padding-left: 8px; border-left: 1px solid var(--color-border-strong); color: var(--color-text); }
 
 .topbarKicker {
   color: var(--color-text);

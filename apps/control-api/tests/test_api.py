@@ -77,6 +77,22 @@ class TestIncidents:
         })
         assert response.status_code == 422
 
+    async def test_active_fingerprint_is_deduplicated(self, client):
+        payload = {
+            "alert_source": {
+                "alertmanager_id": "dedupe-001",
+                "fingerprint": "fp-dedupe-active",
+                "alert_name": "Duplicate Alert",
+                "severity": "warning",
+                "description": "same alert",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        }
+        first = await client.post("/api/incidents", json=payload)
+        second = await client.post("/api/incidents", json=payload)
+        assert first.status_code == second.status_code == 201
+        assert first.json()["id"] == second.json()["id"]
+
     async def test_timeline(self, client):
         create_resp = await client.post("/api/incidents", json={
             "alert_source": {
@@ -97,6 +113,8 @@ class TestIncidents:
 
 @pytest.mark.asyncio
 class TestApprovals:
+    planner_headers = {"X-Sentinel-Role": "planner"}
+    approver_headers = {"X-Sentinel-Role": "approver"}
     async def test_create_approval(self, client):
         # 创建事故
         create_resp = await client.post("/api/incidents", json={
@@ -112,7 +130,7 @@ class TestApprovals:
         incident_id = create_resp.json()["id"]
 
         # 创建审批
-        response = await client.post(f"/api/incidents/{incident_id}/approvals", json={
+        response = await client.post(f"/api/incidents/{incident_id}/approvals", headers=self.planner_headers, json={
             "plan_id": "plan-001",
             "runbook_ref": "restart_deployment@1",
             "target": "payment-api",
@@ -138,7 +156,7 @@ class TestApprovals:
         })
         incident_id = create_resp.json()["id"]
 
-        approval_resp = await client.post(f"/api/incidents/{incident_id}/approvals", json={
+        approval_resp = await client.post(f"/api/incidents/{incident_id}/approvals", headers=self.planner_headers, json={
             "plan_id": "plan-002",
             "runbook_ref": "scale_deployment@1",
             "target": "inventory-api",
@@ -151,11 +169,76 @@ class TestApprovals:
 
         response = await client.put(
             f"/api/incidents/{incident_id}/approvals/{approval_id}",
+            headers=self.approver_headers,
             json={"approved": True, "reason": "证据充分"},
         )
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "approved"
+
+    async def test_approval_requires_approver_role(self, client):
+        create_resp = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "test-role",
+                "fingerprint": "fp-role",
+                "alert_name": "Role Test",
+                "severity": "warning",
+                "description": "Test",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        })
+        incident_id = create_resp.json()["id"]
+        approval_resp = await client.post(
+            f"/api/incidents/{incident_id}/approvals",
+            headers=self.planner_headers,
+            json={
+                "plan_id": "plan-role",
+                "runbook_ref": "restart_deployment@1",
+                "target": "payment-api",
+                "parameters": {},
+                "risk_level": "R1",
+                "plan_hash": "rolehash",
+                "hypothesis_id": "hyp-role",
+            },
+        )
+        approval_id = approval_resp.json()["id"]
+        denied = await client.put(
+            f"/api/incidents/{incident_id}/approvals/{approval_id}",
+            json={"approved": True, "reason": "证据充分"},
+        )
+        assert denied.status_code == 403
+
+    async def test_approval_incident_mismatch_is_rejected(self, client):
+        headers = self.planner_headers
+        first = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "test-mismatch-a", "fingerprint": "fp-mismatch-a",
+                "alert_name": "A", "severity": "warning", "description": "A",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        })
+        second = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "test-mismatch-b", "fingerprint": "fp-mismatch-b",
+                "alert_name": "B", "severity": "warning", "description": "B",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        })
+        approval = await client.post(
+            f"/api/incidents/{first.json()['id']}/approvals",
+            headers=headers,
+            json={
+                "plan_id": "plan-mismatch", "runbook_ref": "restart_deployment@1",
+                "target": "payment-api", "parameters": {}, "risk_level": "R1",
+                "plan_hash": "mismatchhash", "hypothesis_id": "hyp-mismatch",
+            },
+        )
+        response = await client.put(
+            f"/api/incidents/{second.json()['id']}/approvals/{approval.json()['id']}",
+            headers=self.approver_headers,
+            json={"approved": True, "reason": "不应跨事故批准"},
+        )
+        assert response.status_code == 404
 
     async def test_r2_rejected(self, client):
         create_resp = await client.post("/api/incidents", json={
@@ -170,7 +253,7 @@ class TestApprovals:
         })
         incident_id = create_resp.json()["id"]
 
-        response = await client.post(f"/api/incidents/{incident_id}/approvals", json={
+        response = await client.post(f"/api/incidents/{incident_id}/approvals", headers=self.planner_headers, json={
             "plan_id": "plan-r2",
             "runbook_ref": "db_rollback@1",
             "target": "order-db",
@@ -182,6 +265,22 @@ class TestApprovals:
         assert response.status_code == 400  # R2 被拒绝
         assert "R2" in response.json()["detail"]
 
+    async def test_global_approval_queue_returns_incident_context(self, client):
+        response = await client.post("/api/scenarios/payment-latency@1/run", headers={"X-Sentinel-Role": "scenario_operator"})
+        assert response.status_code == 202
+
+        queue_response = await client.get("/api/approvals")
+        assert queue_response.status_code == 200
+        items = queue_response.json()["items"]
+        matching = [item for item in items if item["incident"]["id"] == response.json()["incident_id"]]
+        assert len(matching) == 1
+        assert matching[0]["status"] == "pending"
+        assert matching[0]["incident"]["severity"] == "warning"
+
+    async def test_global_approval_queue_rejects_unknown_status(self, client):
+        response = await client.get("/api/approvals?status=unknown")
+        assert response.status_code == 400
+
 
 @pytest.mark.asyncio
 class TestScenarios:
@@ -191,8 +290,12 @@ class TestScenarios:
         data = response.json()
         assert len(data["items"]) == 6  # 6 个预置场景
 
+    async def test_run_scenario_requires_operator_role(self, client):
+        response = await client.post("/api/scenarios/payment-pod-crash@1/run")
+        assert response.status_code == 403
+
     async def test_run_scenario_creates_incident_and_approval(self, client):
-        response = await client.post("/api/scenarios/order-db-errors@1/run")
+        response = await client.post("/api/scenarios/order-db-errors@1/run", headers={"X-Sentinel-Role": "scenario_operator"})
         assert response.status_code == 202
         data = response.json()
         assert data["status"] == "AWAITING_APPROVAL"
@@ -212,6 +315,7 @@ class TestScenarios:
 
         approve_response = await client.put(
             f"/api/incidents/{incident_id}/approvals/{approvals[0]['id']}",
+            headers={"X-Sentinel-Role": "approver"},
             json={"approved": True, "reason": "演练验证通过"},
         )
         assert approve_response.status_code == 200
