@@ -18,7 +18,9 @@ Sentinel-X Control API — 主应用入口。
 
 import asyncio
 import hashlib
+import hmac
 import json
+import os
 import random
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -26,7 +28,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Query, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -514,6 +516,8 @@ def _compute_plan_hash(
 
 
 store = InMemoryStore()
+ALERT_INGRESS_HMAC_KEY = os.getenv("ALERT_INGRESS_HMAC_KEY")
+ALERT_INGRESS_CLOCK_SKEW_SECONDS = 300
 
 # 预置演示场景
 _store_demo_scenarios(store)
@@ -560,6 +564,33 @@ def _require_role(role: Optional[str], *allowed_roles: str) -> str:
     return normalized
 
 
+async def _verify_alert_ingress(request: Request) -> None:
+    """light 环境也不接受无签名告警；演练场景使用内部调用而非该入口。"""
+    if not ALERT_INGRESS_HMAC_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alert Ingress 未配置 HMAC 密钥",
+        )
+    timestamp = request.headers.get("X-Sentinel-Timestamp")
+    signature = request.headers.get("X-Sentinel-Signature")
+    if not timestamp or not signature or not signature.startswith("sha256="):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 签名缺失")
+    try:
+        timestamp_value = int(timestamp)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 时间戳非法") from exc
+    if abs(datetime.now().timestamp() - timestamp_value) > ALERT_INGRESS_CLOCK_SKEW_SECONDS:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 签名已过期")
+    raw_body = await request.body()
+    expected = hmac.new(
+        ALERT_INGRESS_HMAC_KEY.encode("utf-8"),
+        timestamp.encode("utf-8") + b"\n" + raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature[7:], expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 签名无效")
+
+
 # ---------------------------------------------------------------------------
 # 端点
 # ---------------------------------------------------------------------------
@@ -574,8 +605,9 @@ async def health_check():
 # ---- 事故 ----
 
 @app.post("/api/incidents", status_code=status.HTTP_201_CREATED)
-async def create_incident(data: IncidentCreate):
+async def create_incident(data: IncidentCreate, request: Request):
     """创建事故（Alert Ingress 调用）。"""
+    await _verify_alert_ingress(request)
     incident = store.create_incident(data)
     return {
         "id": incident.id,

@@ -1,14 +1,46 @@
 """Control API 集成测试。"""
 
+import hashlib
+import hmac
+import time
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from sentinel_x_control_api.app import app
+import sentinel_x_control_api.app as control_module
+
+app = control_module.app
+
+
+@pytest.fixture(autouse=True)
+def reset_store(monkeypatch):
+    control_module.store._incidents.clear()
+    control_module.store._fingerprint_index.clear()
+    control_module.store._approvals.clear()
+    monkeypatch.setattr(control_module, "ALERT_INGRESS_HMAC_KEY", "test-alert-ingress-secret")
 
 
 @pytest.fixture
 async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async def sign_alert_request(request):
+        if request.method != "POST" or request.url.path != "/api/incidents":
+            return
+        if "X-Sentinel-Signature" in request.headers:
+            return
+        timestamp = str(int(time.time()))
+        signature = hmac.new(
+            b"test-alert-ingress-secret",
+            timestamp.encode() + b"\n" + request.content,
+            hashlib.sha256,
+        ).hexdigest()
+        request.headers["X-Sentinel-Timestamp"] = timestamp
+        request.headers["X-Sentinel-Signature"] = f"sha256={signature}"
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        event_hooks={"request": [sign_alert_request]},
+    ) as ac:
         yield ac
 
 
@@ -76,6 +108,41 @@ class TestIncidents:
             }
         })
         assert response.status_code == 422
+
+    async def test_alert_ingress_rejects_invalid_signature(self, client):
+        response = await client.post(
+            "/api/incidents",
+            headers={
+                "X-Sentinel-Timestamp": str(int(time.time())),
+                "X-Sentinel-Signature": "sha256=invalid",
+            },
+            json={
+                "alert_source": {
+                    "alertmanager_id": "test-signature",
+                    "fingerprint": "fp-signature",
+                    "alert_name": "Signature Test",
+                    "severity": "warning",
+                    "description": "Test incident",
+                    "started_at": "2026-08-01T21:00:00Z",
+                }
+            },
+        )
+        assert response.status_code == 401
+        assert "签名无效" in response.json()["detail"]
+
+    async def test_alert_ingress_fails_closed_without_secret(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "ALERT_INGRESS_HMAC_KEY", None)
+        response = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "test-no-secret",
+                "fingerprint": "fp-no-secret",
+                "alert_name": "No Secret Test",
+                "severity": "warning",
+                "description": "Test incident",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        })
+        assert response.status_code == 503
 
     async def test_active_fingerprint_is_deduplicated(self, client):
         payload = {
