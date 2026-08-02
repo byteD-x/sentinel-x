@@ -143,6 +143,7 @@ python -m pytest demo/services/tests/test_services.py -v --tb=short --asyncio-mo
 
 - 只面向本地隔离演练环境，不连接真实生产系统、生产告警或生产数据。
 - 诊断默认只读；日志、Trace、告警和工具结果都被视为不可信输入。
+- `POST /api/incidents` 是 Alert Ingress，要求 `X-Sentinel-Timestamp` 和 `X-Sentinel-Signature`；未配置 `ALERT_INGRESS_HMAC_KEY` 时拒绝请求。
 - 禁止任意 Shell、`kubectl`、`pods/exec`、Secrets 读取、`cluster-admin` 和跨 namespace 写操作。
 - MVP 的 R1 动作只有登记过的 Deployment 重启和限定范围扩容，并且必须人工批准。
 - light Action Gateway 默认 kill switch 开启；未配置 `SENTINEL_APPROVAL_TOKEN_SECRET` 或管理员令牌时拒绝受控动作。
