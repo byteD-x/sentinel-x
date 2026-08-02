@@ -17,7 +17,7 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`python -m pytest -q --tb=short --asyncio-mode=auto`，2026-08-02（Windows，本地 light）结果为 `81 passed`。
+- 本地门禁：`python -m pytest -q --tb=short --asyncio-mode=auto`，2026-08-02（Windows，本地 light）结果为 `83 passed`。
 - 前端门禁：`npm run build` 与 `npm run lint`（目录 `apps/web-console`）通过。
 - 限制：Temporal Server replay、PostgreSQL migration、full Kubernetes/observability E2E、数据库绑定审批授权和固定评测仍未完成。
 
