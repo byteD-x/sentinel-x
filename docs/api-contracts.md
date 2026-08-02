@@ -2,7 +2,7 @@
 
 ## 1. 状态与事实来源
 
-本文定义目标 API 语义和安全边界。当前仓库已有 light/prototype FastAPI 端点，但实现路径、请求体和安全门禁尚未完全收敛到本文：Control API 仍使用 `/api/...`，Action Gateway 仍使用 prototype `/api/actions`，正式 `/api/v1` 与 `/internal/v1`、HMAC/CSRF/TokenReview/DB 绑定审批等门禁仍属于未完成项。light 场景启动会创建内存事故、证据和审批记录；批准后的执行/验证事件是 `light-fixture`，不代表真实 Kubernetes 写入。
+本文定义目标 API 语义和安全边界。当前仓库已有 light/prototype FastAPI 端点，但实现路径、请求体和安全门禁尚未完全收敛到本文：Control API 仍使用 `/api/...`，Action Gateway 仍使用 prototype `/api/actions`，正式 `/api/v1` 与 `/internal/v1`、浏览器会话/CSRF、TokenReview/DB 绑定审批等门禁仍属于未完成项。light Control API 用 `X-Sentinel-Role` 实现本地演示能力门控，不能作为认证；Action Gateway 用独立 HMAC 审批凭证和管理员令牌 fail-closed，仍不读取数据库审批记录。light 场景启动会创建内存事故、证据和审批记录；批准后的执行/验证事件是 `light-fixture`，不代表真实 Kubernetes 写入。
 
 实现收敛前，本文是目标契约；代码与测试只能证明 prototype 行为。完成 D1/D2 门禁后，版本化 OpenAPI、生成的 JSON Schema 和契约测试才成为执行事实来源；本文继续维护跨端点规则和设计理由。
 
@@ -203,13 +203,15 @@ data: {"schema_version":"1.0","incident_id":"inc_example","sequence":184,"event_
 - 客户端按 `incident_id + sequence` 去重，发现 gap 立即暂停实时渲染并 REST 补齐。
 - payload 不包含原始秘密、审批凭证或完整大 Evidence。
 
+当前 light/prototype `GET /api/incidents/{id}/stream` 会发送 `id: <sequence>` 与 `event: timeline_event`，接受数值 `Last-Event-ID` 从下一序号补发；前端同时以 REST timeline 补读防止连接缺口。它没有数据库保留窗口、心跳或 410 过期语义，不能视为完整 SSE 契约实现。
+
 ## 11. Approval API
 
 ### `GET /api/v1/approval-requests`
 
 approver 查看 `PENDING` 请求，可按过期时间、risk 和 service 筛选。
 
-当前 light/prototype 实现提供 `GET /api/approvals?status=pending|all|approved|rejected|expired`，返回审批记录及其关联事故摘要，用于 Web Console 审批队列。该端点尚未实现正式契约要求的认证、ETag、CSRF 和数据库持久化，不能视为 full profile 审批 API。
+当前 light/prototype 实现提供 `GET /api/approvals?status=pending|all|approved|rejected|expired`，返回审批记录及其关联事故摘要，用于 Web Console 审批队列。`PUT /api/incidents/{incident_id}/approvals/{approval_id}` 要求 `X-Sentinel-Role: approver`，并校验审批与事故归属；该 header 仅用于 local-demo。端点尚未实现正式契约要求的认证、ETag、CSRF 和数据库持久化，不能视为 full profile 审批 API。
 
 ### `GET /api/v1/approval-requests/{id}`
 

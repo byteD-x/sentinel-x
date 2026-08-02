@@ -73,9 +73,10 @@ sentinel-chaos     Scenario Runner / Toxiproxy / fault fixtures
 
 ### `light`
 
-- Control API、Worker、PostgreSQL、Temporal 开发环境。
+- Control API 和 Worker 的本地 fixture 开发环境；PostgreSQL 与 Temporal 不是 light 的必需依赖。
 - 遥测通过固定脱敏 fixture 或裁剪组件提供。
 - Kubernetes 写动作和真实故障注入强制关闭，kill switch 开启。
+- Action Gateway 未配置 `SENTINEL_APPROVAL_TOKEN_SECRET` 时拒绝全部 R1；Worker 不连接 Temporal，full profile 不可用时拒绝降级。
 - 适合状态机、API、UI、prompt Schema、replay 和单元/契约测试。
 - 结果标记 `profile=light`，不能声称完整 OTel/K8s E2E。
 
