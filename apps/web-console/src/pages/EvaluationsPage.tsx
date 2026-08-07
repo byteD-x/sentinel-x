@@ -34,7 +34,7 @@ export function EvaluationsPage() {
         <div>
           <div className={styles.eyebrow}><BarChart3 size={14} aria-hidden="true" /> 演练记录</div>
           <h1>演练记录</h1>
-          <p>这里记录演练过程中的故障、证据和处置结果，不代表线上系统指标。</p>
+          <p>记录本地演练中的故障、证据和处置结果，不展示生产系统指标。</p>
         </div>
         <button className={styles.refresh} type="button" onClick={load} disabled={loading} title="刷新演练记录状态">
           <RefreshCw size={15} aria-hidden="true" /> 刷新
@@ -56,7 +56,7 @@ export function EvaluationsPage() {
           </article>
           <article className={styles.item}>
             <CircleAlert size={18} aria-hidden="true" />
-            <div><strong>效果指标</strong><span>线上恢复速度和诊断准确度暂未采集</span></div>
+            <div><strong>效果指标</strong><span>生产恢复速度和诊断准确度尚未采集</span></div>
             <b>未采集</b>
           </article>
         </div>

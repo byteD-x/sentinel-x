@@ -99,11 +99,11 @@ export function ApprovalsPage() {
         <div>
           <div className={styles.eyebrow}><ClipboardCheck size={14} aria-hidden="true" /> 恢复审批</div>
           <h1 className={styles.title}>恢复操作审批</h1>
-          <p className={styles.subtitle}>这里列出等待审批的恢复操作。查看故障影响、证据和目标服务后，再提交审批决定。当前角色：{ROLE_LABELS[role] || '只读'}。</p>
+          <p className={styles.subtitle}>先核对目标服务、影响范围和风险级别，再提交审批决定。当前角色：{ROLE_LABELS[role] || '只读'}。</p>
         </div>
         <button className={styles.refreshButton} type="button" onClick={fetchApprovals} disabled={loading} title="刷新审批队列">
           <RefreshCw size={15} className={loading ? styles.spin : ''} aria-hidden="true" />
-          刷新审批队列
+          刷新
         </button>
       </header>
 
@@ -112,7 +112,7 @@ export function ApprovalsPage() {
           <span className={styles.summaryIcon}><ShieldCheck size={17} aria-hidden="true" /></span>
           <div>
             <strong>{statusFilter === 'pending' ? `${items.length} 项待审批` : `${items.length} 条审批记录`}</strong>
-          <span>{statusFilter === 'pending' ? '审批通过后才会执行恢复操作' : '这里只展示已经提交的审批决定'}</span>
+          <span>{statusFilter === 'pending' ? '通过后才会执行恢复操作' : '已提交的审批决定'}</span>
           </div>
         </div>
         <div className={styles.filters} aria-label="审批状态筛选">
@@ -143,7 +143,7 @@ export function ApprovalsPage() {
         <div className={styles.emptyState}>
           <ClipboardCheck size={24} aria-hidden="true" />
           <strong>{statusFilter === 'pending' ? '当前没有待审批的恢复操作' : '没有符合条件的审批记录'}</strong>
-          <span>{statusFilter === 'pending' ? '新的恢复操作会在生成方案后显示。' : '可以切换筛选，查看历史审批决定。'}</span>
+          <span>{statusFilter === 'pending' ? '新的恢复方案会出现在这里。' : '切换上方筛选查看其他记录。'}</span>
         </div>
       ) : (
         <section className={styles.queue} aria-label="审批记录" role="list">

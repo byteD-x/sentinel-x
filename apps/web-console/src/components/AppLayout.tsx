@@ -6,10 +6,10 @@ import { ROLE_LABELS } from '../lib/presentation'
 import styles from './AppLayout.module.css'
 
 const navigation = [
-  { to: '/', label: '故障总览', icon: Activity, end: true },
-  { to: '/approvals', label: '恢复审批', icon: ClipboardCheck },
-  { to: '/scenarios', label: '故障场景', icon: FlaskConical },
-  { to: '/evaluations', label: '演练记录', icon: BarChart3 },
+  { to: '/', label: '故障', icon: Activity, end: true },
+  { to: '/approvals', label: '审批', icon: ClipboardCheck },
+  { to: '/scenarios', label: '场景', icon: FlaskConical },
+  { to: '/evaluations', label: '记录', icon: BarChart3 },
   { to: '/system', label: '环境', icon: TerminalSquare },
 ]
 
@@ -33,23 +33,39 @@ export function AppLayout() {
     return () => { active = false; window.clearInterval(timer) }
   }, [])
 
-  const healthLabel = health.state === 'online' ? '系统已连接' : health.state === 'loading' ? '正在连接系统' : '系统未连接'
+  const healthLabel = health.state === 'online' ? '控制面在线' : health.state === 'loading' ? '正在连接' : '控制面离线'
   const healthClass = health.state === 'online' ? styles.streamOnline : health.state === 'loading' ? styles.streamChecking : styles.streamOffline
+  const roleLabel = ROLE_LABELS[role] || '只读'
 
   return (
     <div className={styles.layout}>
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
           <div className={styles.brandMark} aria-hidden="true"><ShieldCheck size={20} strokeWidth={2.3} /></div>
-          <div>
+          <div className={styles.brandText}>
             <div className={styles.brandName}>Sentinel-X</div>
-            <div className={styles.brandCaption}>故障处理台</div>
+            <div className={styles.brandCaption}>故障指挥台</div>
           </div>
           <span className={styles.brandBadge}>演练</span>
         </div>
 
+        <div className={styles.commandPanel} aria-label="运行边界">
+          <div>
+            <span>环境</span>
+            <strong>{health.profile || 'light'}</strong>
+          </div>
+          <div>
+            <span>身份</span>
+            <strong>{roleLabel}</strong>
+          </div>
+          <div>
+            <span>动作</span>
+            <strong>{health.actionsEnabled ? '审批后执行' : '关闭'}</strong>
+          </div>
+        </div>
+
         <div className={styles.navBlock}>
-          <p className={styles.navLabel}>工作区</p>
+          <p className={styles.navLabel}>工作台</p>
           <nav className={styles.nav} aria-label="主导航">
             {navigation.map(({ to, label, icon: Icon, end }) => (
               <NavLink
@@ -69,13 +85,13 @@ export function AppLayout() {
           <div className={styles.environmentStatus}>
             <span className={`${styles.statusDot} ${health.state === 'offline' ? styles.statusDotOffline : ''}`} aria-hidden="true" />
             <div>
-              <strong>演练环境</strong>
-              <span>{ROLE_LABELS[role] || '只读'}</span>
+              <strong>本地演练</strong>
+              <span>与生产环境隔离</span>
             </div>
           </div>
           <div className={styles.safetyNote}>
             <LockKeyhole size={14} aria-hidden="true" />
-            <span>{health.actionsEnabled ? '恢复操作需审批' : '恢复操作已关闭'}</span>
+            <span>{health.actionsEnabled ? 'R1 操作经审批后执行' : '恢复操作已关闭'}</span>
           </div>
         </div>
       </aside>
@@ -83,15 +99,15 @@ export function AppLayout() {
       <div className={styles.contentShell}>
         <header className={styles.topbar}>
           <div className={styles.topbarContext}>
-            <span className={styles.topbarKicker}>故障处理台</span>
-            <span className={styles.topbarDivider}>·</span>
-            <span>演练环境</span>
+            <span className={styles.topbarKicker}>故障指挥台</span>
+            <span className={styles.topbarDivider}>/</span>
+            <span>演练</span>
           </div>
           <div className={`${styles.streamStatus} ${healthClass}`} role="status" aria-live="polite">
             <Radio size={14} aria-hidden="true" />
             <span>{healthLabel}</span>
             <Circle size={7} fill="currentColor" aria-hidden="true" />
-            <span className={styles.roleBadge}>{ROLE_LABELS[role] || '只读'}</span>
+            <span className={styles.roleBadge}>{roleLabel}</span>
           </div>
         </header>
         <main className={styles.main}><Outlet /></main>

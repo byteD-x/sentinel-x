@@ -17,16 +17,30 @@ interface Incident {
 }
 
 const STATUS_CLASS: Record<string, string> = {
-  DETECTED: styles.statusInfo, TRIAGING: styles.statusWorking, DIAGNOSING: styles.statusWorking,
-  PLAN_PROPOSED: styles.statusWorking, AWAITING_APPROVAL: styles.statusPending, EXECUTING: styles.statusWorking,
-  VERIFYING: styles.statusWorking, RESOLVED: styles.statusResolved, ESCALATED: styles.statusEscalated,
+  DETECTED: styles.statusInfo,
+  TRIAGING: styles.statusWorking,
+  DIAGNOSING: styles.statusWorking,
+  PLAN_PROPOSED: styles.statusWorking,
+  AWAITING_APPROVAL: styles.statusPending,
+  EXECUTING: styles.statusWorking,
+  VERIFYING: styles.statusWorking,
+  RESOLVED: styles.statusResolved,
+  ESCALATED: styles.statusEscalated,
   FAILED: styles.statusFailed,
 }
 
-const SEVERITY_CLASS: Record<string, string> = { critical: styles.severityCritical, warning: styles.severityWarning, info: styles.severityInfo }
+const SEVERITY_CLASS: Record<string, string> = {
+  critical: styles.severityCritical,
+  warning: styles.severityWarning,
+  info: styles.severityInfo,
+}
+
 const STATUS_FILTERS = [
-  { value: 'all', label: '全部' }, { value: 'AWAITING_APPROVAL', label: '待审批' },
-  { value: 'DIAGNOSING', label: '调查中' }, { value: 'RESOLVED', label: '已恢复' }, { value: 'ESCALATED', label: '已升级' },
+  { value: 'all', label: '全部' },
+  { value: 'AWAITING_APPROVAL', label: '待审批' },
+  { value: 'DIAGNOSING', label: '调查中' },
+  { value: 'RESOLVED', label: '已恢复' },
+  { value: 'ESCALATED', label: '已升级' },
 ]
 
 const FLOW_STEPS = [
@@ -36,6 +50,8 @@ const FLOW_STEPS = [
   { key: 'execute', label: '执行', icon: PlayCircle },
   { key: 'verify', label: '验证', icon: ShieldCheck },
 ]
+
+const severityRank: Record<string, number> = { critical: 0, warning: 1, info: 2 }
 
 function stepIndex(status: string) {
   if (status === 'DETECTED') return 0
@@ -61,12 +77,13 @@ export function DashboardPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null)
 
   const fetchIncidents = useCallback(async () => {
+    setLoading(true)
     try {
       const params = new URLSearchParams({ limit: '20' })
       if (statusFilter !== 'all') params.set('status', statusFilter)
       if (cursor) params.set('cursor', cursor)
       const response = await apiFetch(`/api/incidents?${params.toString()}`)
-      const data = await response.json()
+      const data = await response.json() as { items?: Incident[]; next_cursor?: string | null }
       setIncidents(data.items || [])
       setNextCursor(data.next_cursor || null)
       setError(null)
@@ -81,7 +98,10 @@ export function DashboardPage() {
 
   const activeIncidents = useMemo(() => incidents.filter(item => !['RESOLVED', 'ESCALATED', 'FAILED'].includes(item.status)), [incidents])
   const pendingApproval = useMemo(() => incidents.find(item => item.status === 'AWAITING_APPROVAL'), [incidents])
-  const priorityIncident = pendingApproval || [...activeIncidents].sort((a, b) => (a.severity === 'critical' ? -1 : 1) - (b.severity === 'critical' ? -1 : 1))[0]
+  const priorityIncident = useMemo(() => {
+    if (pendingApproval) return pendingApproval
+    return [...activeIncidents].sort((a, b) => (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9))[0]
+  }, [activeIncidents, pendingApproval])
   const resolvedCount = incidents.filter(item => item.status === 'RESOLVED').length
   const criticalCount = incidents.filter(item => item.severity === 'critical').length
   const approvalCount = incidents.filter(item => item.status === 'AWAITING_APPROVAL').length
@@ -125,22 +145,23 @@ export function DashboardPage() {
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.breadcrumb}>故障处理台 / 总览</p>
+          <p className={styles.breadcrumb}>故障控制台 / 总览</p>
           <h1 className={styles.title}>故障总览</h1>
-          <p className={styles.subtitle}>按发现、调查、审批、恢复、验证的顺序处理故障。当前为演练环境。</p>
+          <p className={styles.subtitle}>集中查看处理中、待审批和已恢复的故障。数据来自本地演练环境。</p>
         </div>
         <div className={styles.actions}>
-          <button className={styles.secondaryButton} type="button" onClick={fetchIncidents} disabled={loading}>
+          <button className={styles.secondaryButton} type="button" onClick={fetchIncidents} disabled={loading} aria-label="刷新故障列表">
             <RefreshCw size={15} className={loading ? styles.spin : ''} aria-hidden="true" /> 刷新
           </button>
-          {!seeded && <button className={styles.primaryButton} type="button" onClick={handleSeed}><Activity size={15} aria-hidden="true" /> 加载演练数据</button>}
+          {!seeded && <button className={styles.primaryButton} type="button" onClick={handleSeed}><Activity size={15} aria-hidden="true" /> 导入演练数据</button>}
         </div>
       </header>
 
-      <section className={styles.flowSection} aria-label="故障处置流程">
-        <div className={styles.sectionHeading}>
-          <div><span className={styles.sectionKicker}>处置流程</span><h2>按顺序推进，避免遗漏关键步骤</h2></div>
-          <span className={styles.flowHint}>演练环境</span>
+      <section className={styles.commandDeck} aria-label="当前处置状态">
+        <div className={styles.deckIntro}>
+          <span className={styles.sectionKicker}>当前处置阶段</span>
+          <h2>{priorityIncident ? '按流程推进' : '暂无故障'}</h2>
+          <p>{priorityIncident ? '优先处理待审批项，再按严重级别查看其他故障。' : '导入演练数据后，这里会显示待处理事项。'}</p>
         </div>
         <div className={styles.flow}>
           {FLOW_STEPS.map((step, index) => {
@@ -161,7 +182,7 @@ export function DashboardPage() {
       <section className={styles.focusGrid} aria-label="当前重点">
         <div className={styles.focusPanel}>
           <div className={styles.sectionHeading}>
-            <div><span className={styles.sectionKicker}>优先处理</span><h2>{priorityIncident ? (pendingApproval ? '审批恢复操作' : '查看高优先级故障') : '加载演练数据'}</h2></div>
+            <div><span className={styles.sectionKicker}>优先处理</span><h2>{priorityIncident ? (pendingApproval ? '待处理审批' : '待处理故障') : '开始一次演练'}</h2></div>
             {priorityIncident && <span className={`${styles.statusBadge} ${STATUS_CLASS[priorityIncident.status] || ''}`}>{INCIDENT_STATUS_LABELS[priorityIncident.status] || priorityIncident.status}</span>}
           </div>
           {priorityIncident ? (
@@ -173,44 +194,50 @@ export function DashboardPage() {
                 <span>最近更新 {formatTime(priorityIncident.updated_at)}</span>
               </div>
               <Link className={styles.actionLink} to={`/incidents/${priorityIncident.id}`}>
-                查看故障详情 <ArrowRight size={16} aria-hidden="true" />
+                查看详情 <ArrowRight size={16} aria-hidden="true" />
               </Link>
             </>
           ) : (
             <>
-              <p className={styles.focusDescription}>当前没有故障。可以加载演练数据，或从故障场景目录启动一次演练。</p>
-              <div className={styles.emptyActions}><button className={styles.primaryButton} type="button" onClick={handleSeed}><Activity size={15} aria-hidden="true" /> 加载演练数据</button><Link className={styles.textLink} to="/scenarios">打开故障场景 <ArrowRight size={15} aria-hidden="true" /></Link></div>
+              <p className={styles.focusDescription}>当前没有故障。可以导入一组演练数据，或从故障场景开始。</p>
+              <div className={styles.emptyActions}>
+                <button className={styles.primaryButton} type="button" onClick={handleSeed}><Activity size={15} aria-hidden="true" /> 导入演练数据</button>
+                <Link className={styles.textLink} to="/scenarios">选择故障场景 <ArrowRight size={15} aria-hidden="true" /></Link>
+              </div>
             </>
           )}
         </div>
         <div className={styles.contextPanel}>
-          <div className={styles.sectionHeading}><div><span className={styles.sectionKicker}>演练环境</span><h2>不会写入生产系统</h2></div><CheckCircle2 size={20} className={styles.contextIcon} aria-hidden="true" /></div>
-          <p>当前数据仅用于演练。恢复操作默认关闭，启用时必须经过审批。</p>
+          <div className={styles.sectionHeading}>
+            <div><span className={styles.sectionKicker}>安全边界</span><h2>不写入生产</h2></div>
+            <CheckCircle2 size={20} className={styles.contextIcon} aria-hidden="true" />
+          </div>
+          <p>所有动作都在隔离环境内运行。R2/R3 禁止执行；R1 需核对审批凭证和参数校验。</p>
           <div className={styles.contextRows}>
-            <div><span>系统连接</span><strong className={styles.good}>已连接</strong></div>
             <div><span>数据范围</span><strong className={styles.good}>仅演练数据</strong></div>
-            <div><span>恢复操作</span><strong className={styles.waiting}>需审批</strong></div>
+          <div><span>恢复操作</span><strong className={styles.waiting}>审批后执行</strong></div>
+            <div><span>失败处理</span><strong>保留原因</strong></div>
           </div>
         </div>
       </section>
 
       <section className={styles.summaryBar} aria-label="故障摘要">
-        <div><span>处理中</span><strong>{loading ? '—' : activeIncidents.length}</strong></div>
-        <div><span>待审批</span><strong className={approvalCount ? styles.numberWarning : ''}>{loading ? '—' : approvalCount}</strong></div>
-        <div><span>严重</span><strong className={criticalCount ? styles.numberDanger : ''}>{loading ? '—' : criticalCount}</strong></div>
-        <div><span>已恢复</span><strong className={styles.numberSuccess}>{loading ? '—' : resolvedCount}</strong></div>
+        <div><span>处理中</span><strong>{loading ? '-' : activeIncidents.length}</strong></div>
+        <div><span>待审批</span><strong className={approvalCount ? styles.numberWarning : ''}>{loading ? '-' : approvalCount}</strong></div>
+          <div><span>严重故障</span><strong className={criticalCount ? styles.numberDanger : ''}>{loading ? '-' : criticalCount}</strong></div>
+        <div><span>已恢复</span><strong className={styles.numberSuccess}>{loading ? '-' : resolvedCount}</strong></div>
       </section>
 
       <section className={styles.queueSection}>
         <div className={styles.sectionHeader}>
-          <div><span className={styles.sectionKicker}>故障列表</span><h2>当前故障</h2></div>
+          <div><span className={styles.sectionKicker}>故障列表</span><h2>全部故障</h2></div>
           <div className={styles.filterBar} aria-label="故障筛选">
             {STATUS_FILTERS.map(filter => <button key={filter.value} className={filter.value === statusFilter ? styles.filterActive : styles.filterButton} type="button" aria-pressed={filter.value === statusFilter} onClick={() => handleFilterChange(filter.value)}>{filter.label}</button>)}
           </div>
         </div>
 
-        {error && <div className={styles.errorBanner} role="alert"><AlertTriangle size={16} aria-hidden="true" /> {error}。请检查控制面是否已启动。</div>}
-        {loading ? <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} /> 正在加载故障</div> : error ? <div className={styles.emptyState}><AlertTriangle size={22} aria-hidden="true" /><strong>暂时无法读取故障</strong><span>请确认系统已启动后再试。</span></div> : incidents.length === 0 ? <div className={styles.emptyState}><Timer size={22} aria-hidden="true" /><strong>没有符合条件的故障</strong><span>可以切换筛选，或去故障演练创建一个问题。</span></div> : (
+        {error && <div className={styles.errorBanner} role="alert"><AlertTriangle size={16} aria-hidden="true" /> {error}。请确认控制面在线后重试。</div>}
+        {loading ? <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} /> 正在加载故障</div> : error ? <div className={styles.emptyState}><AlertTriangle size={22} aria-hidden="true" /><strong>无法读取故障</strong><span>启动控制面后重试。</span></div> : incidents.length === 0 ? <div className={styles.emptyState}><Timer size={22} aria-hidden="true" /><strong>没有匹配的故障</strong><span>切换筛选，或从故障场景启动演练。</span></div> : (
           <div className={styles.table} role="table" aria-label="故障列表">
             <div className={styles.tableHeader} role="row"><span>状态</span><span>故障</span><span>影响描述</span><span>级别</span><span>时间</span><span aria-hidden="true" /></div>
             {incidents.map(incident => <Link key={incident.id} to={`/incidents/${incident.id}`} className={styles.tableRow} role="row">

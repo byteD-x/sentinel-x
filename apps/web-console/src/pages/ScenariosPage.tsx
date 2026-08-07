@@ -79,7 +79,7 @@ export function ScenariosPage() {
         <div>
           <p className={styles.breadcrumb}>故障处理台 / 故障场景</p>
           <h1 className={styles.title}>故障场景</h1>
-          <p className={styles.subtitle}>选择场景后查看影响范围和恢复方式，启动后进入调查流程。仅使用演练数据。</p>
+          <p className={styles.subtitle}>在隔离环境复现故障，先检查影响范围和恢复条件，再启动演练。</p>
         </div>
         <div className={styles.catalogCount}><strong>{scenarios.length}</strong><span>个可用场景</span></div>
       </header>
@@ -89,7 +89,7 @@ export function ScenariosPage() {
 
       <div className={styles.workspace}>
         <section className={styles.catalog} aria-label="故障场景列表">
-          <div className={styles.sectionHeading}><div><span className={styles.sectionKicker}>1. 选择</span><h2>选择故障场景</h2></div><span className={styles.sectionHint}>查看影响范围和恢复方式</span></div>
+          <div className={styles.sectionHeading}><div><span className={styles.sectionKicker}>1. 选择</span><h2>故障场景</h2></div><span className={styles.sectionHint}>查看影响范围和恢复条件</span></div>
           {loading ? <div className={styles.empty}><LoaderCircle className={styles.spin} size={20} /> 正在加载场景</div> : scenarios.length === 0 ? <div className={styles.emptyState}><FlaskConical size={24} aria-hidden="true" /><strong>暂无可用场景</strong><span>请检查控制面是否已启动。</span></div> : <div className={styles.scenarioList}>
             {scenarios.map(scenario => <button key={scenario.id} type="button" className={`${styles.scenarioRow} ${scenario.id === selectedId ? styles.scenarioSelected : ''}`} onClick={() => handleSelectScenario(scenario.id)} aria-pressed={scenario.id === selectedId}>
               <span className={`${styles.categoryRail} ${CATEGORY_CLASS[scenario.category] || ''}`} aria-hidden="true" />
@@ -104,10 +104,10 @@ export function ScenariosPage() {
         </section>
 
         <aside ref={preflightRef} className={styles.preflight} aria-label="演练启动条件">
-          <div className={styles.sectionHeading}><div><span className={styles.sectionKicker}>2. 确认</span><h2>确认演练条件</h2></div><ClipboardCheck size={19} className={styles.preflightIcon} aria-hidden="true" /></div>
+          <div className={styles.sectionHeading}><div><span className={styles.sectionKicker}>2. 检查</span><h2>启动前检查</h2></div><ClipboardCheck size={19} className={styles.preflightIcon} aria-hidden="true" /></div>
           {selected ? <>
             <p className={styles.preflightTitle}>{scenarioLabel(selected.name)}</p>
-            <p className={styles.preflightIntro}>核对影响范围和恢复方式后启动演练。启动后进入调查流程。</p>
+            <p className={styles.preflightIntro}>核对影响范围和恢复条件后启动。系统会创建对应的故障记录。</p>
             <dl className={styles.preflightDetails}>
               <div><dt>目标服务</dt><dd>{targetFor(selected.id)}</dd></div>
               <div><dt>故障表现</dt><dd>{scenarioDescription(selected.id, selected.description)}</dd></div>
@@ -124,7 +124,7 @@ export function ScenariosPage() {
               {runningId === selected.id ? <LoaderCircle className={styles.spin} size={16} /> : <Play size={15} fill="currentColor" aria-hidden="true" />}
               {runningId === selected.id ? '启动中' : '启动演练'}
             </button>
-          </> : <div className={styles.preflightEmpty}><ClipboardCheck size={28} aria-hidden="true" /><strong>先选择一个场景</strong><span>这里显示目标服务、故障表现和恢复方式。</span></div>}
+          </> : <div className={styles.preflightEmpty}><ClipboardCheck size={28} aria-hidden="true" /><strong>选择一个场景</strong><span>这里显示目标服务、故障表现和恢复条件。</span></div>}
         </aside>
       </div>
     </div>

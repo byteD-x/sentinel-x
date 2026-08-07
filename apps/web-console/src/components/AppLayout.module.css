@@ -1,57 +1,65 @@
 .layout { min-height: 100vh; display: flex; background: var(--color-bg); }
-.sidebar { width: 244px; flex: 0 0 244px; display: flex; flex-direction: column; padding: 22px 14px 18px; border-right: 1px solid var(--color-border); background: #10243f; color: #fff; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 9px; }
-.brandMark { width: 34px; height: 34px; display: grid; place-items: center; color: #10243f; border-radius: 8px; background: #8bd4c0; }
-.brandName { color: #fff; font-size: 16px; font-weight: 750; letter-spacing: .01em; }
-.brandCaption { margin-top: 2px; color: #afc0d1; font-size: 10px; }
-.brandBadge { margin-left: auto; padding: 3px 7px; border: 1px solid #45617d; border-radius: 4px; color: #c5d4e4; font-size: 10px; }
-.navBlock { min-width: 0; margin-top: 54px; }
-.navLabel { padding: 0 12px; color: #7e98b2; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
-.nav { min-width: 0; display: grid; gap: 5px; margin-top: 12px; }
-.navLink, .navLinkActive { min-height: 43px; display: flex; align-items: center; gap: 11px; padding: 0 12px; border-left: 2px solid transparent; border-radius: 4px; color: #b6c5d5; font-size: 13px; transition: background 160ms ease, color 160ms ease, border-color 160ms ease; }
-.navLink:hover { color: #fff; background: #1b3655; }
-.navLinkActive { border-left-color: #8bd4c0; color: #fff; background: #1b3655; }
-.sidebarFooter { margin-top: auto; display: grid; gap: 14px; padding: 16px 9px 0; border-top: 1px solid #29445f; }
+.sidebar { width: 248px; flex: 0 0 248px; display: flex; flex-direction: column; padding: 18px 13px 16px; border-right: 1px solid #2a332f; background: #151b18; color: #f4f7f5; }
+.brand { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 4px 8px 15px; border-bottom: 1px solid #2a332f; }
+.brandMark { width: 36px; height: 36px; display: grid; place-items: center; color: #fff; border-radius: 7px; background: #087f72; }
+.brandText { min-width: 0; }
+.brandName { color: #fff; font-size: 16px; font-weight: 760; line-height: 1.1; }
+.brandCaption { margin-top: 3px; color: #99a59f; font-size: 11px; }
+.brandBadge { padding: 3px 7px; border: 1px solid #34413b; border-radius: 4px; color: #77d6be; font-size: 10px; font-weight: 700; }
+.commandPanel { display: grid; gap: 1px; margin: 16px 0 0; border: 1px solid #2d3833; background: #1b231f; }
+.commandPanel div { min-width: 0; display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px 10px; border-bottom: 1px solid #2d3833; }
+.commandPanel div:last-child { border-bottom: 0; }
+.commandPanel span { color: #93a099; font-size: 11px; }
+.commandPanel strong { min-width: 0; color: #f7fbfc; font-size: 12px; overflow-wrap: anywhere; }
+.navBlock { min-width: 0; margin-top: 26px; }
+.navLabel { padding: 0 10px; color: #849089; font-size: 10px; font-weight: 700; }
+.nav { min-width: 0; display: grid; gap: 4px; margin-top: 10px; }
+.navLink, .navLinkActive { min-height: 40px; display: flex; align-items: center; gap: 11px; padding: 0 11px; border: 1px solid transparent; border-radius: 6px; color: #c8d0cc; font-size: 13px; transition: background 160ms ease, color 160ms ease, border-color 160ms ease; }
+.navLink:hover { color: #fff; background: #202a25; }
+.navLinkActive { border-color: #326f64; color: #fff; background: #123d36; }
+.sidebarFooter { margin-top: auto; display: grid; gap: 14px; padding: 16px 8px 0; border-top: 1px solid #2a332f; }
 .environmentStatus { display: flex; align-items: flex-start; gap: 10px; }
-.statusDot { width: 8px; height: 8px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: #8bd4c0; box-shadow: 0 0 0 4px rgba(139, 212, 192, .13); }
-.statusDotOffline { background: #f48b8b; box-shadow: 0 0 0 4px rgba(244, 139, 139, .13); }
+.statusDot { width: 8px; height: 8px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: #3fb950; box-shadow: 0 0 0 4px rgba(63, 185, 80, .16); }
+.statusDotOffline { background: #f85149; box-shadow: 0 0 0 4px rgba(248, 81, 73, .16); }
 .environmentStatus div { display: grid; gap: 2px; }
 .environmentStatus strong { color: #fff; font-size: 11px; }
-.environmentStatus span { color: #9fb1c4; font-size: 11px; }
-.safetyNote { display: flex; align-items: center; gap: 8px; color: #a8bbcf; font-size: 11px; line-height: 1.35; }
+.environmentStatus span { color: #93a099; font-size: 11px; }
+.safetyNote { display: flex; align-items: flex-start; gap: 8px; color: #93a099; font-size: 11px; line-height: 1.4; }
+.safetyNote svg { flex: 0 0 auto; margin-top: 1px; color: #d29922; }
 .contentShell { min-width: 0; flex: 1; }
-.topbar { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 34px; border-bottom: 1px solid var(--color-border); background: rgba(255, 255, 255, .94); }
-.topbarContext, .streamStatus { display: flex; align-items: center; gap: 9px; color: var(--color-text-muted); font-size: 11px; }
+.topbar { min-height: 52px; position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 30px; border-bottom: 1px solid var(--color-border); background: rgba(255, 255, 255, .93); backdrop-filter: blur(14px); }
+.topbarContext, .streamStatus { display: flex; align-items: center; gap: 9px; color: var(--color-text-muted); font-size: 12px; }
 .streamOnline { color: var(--color-success); }
 .streamChecking { color: var(--color-warning); }
 .streamOffline { color: var(--color-danger); }
-.roleBadge { margin-left: 8px; padding-left: 9px; border-left: 1px solid var(--color-border); color: var(--color-text); }
-.topbarKicker { color: var(--color-text); font-weight: 700; }
+.roleBadge { margin-left: 8px; padding-left: 9px; border-left: 1px solid var(--color-border); color: var(--color-text); font-weight: 700; }
+.topbarKicker { color: var(--color-text); font-weight: 800; }
 .topbarDivider { color: var(--color-text-dim); }
 .streamStatus { font-size: 11px; }
-.main { width: min(1440px, 100%); margin: 0 auto; padding: 34px 42px 56px; }
+.main { width: min(1240px, 100%); margin: 0 auto; padding: 30px 32px 52px; }
 
-@media (max-width: 860px) {
+@media (max-width: 900px) {
   .layout { display: block; }
-  .sidebar { width: 100%; min-height: 0; padding: 15px 18px 0; border-right: 0; border-bottom: 1px solid #29445f; }
-  .navBlock { margin-top: 20px; }
-  .nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding-bottom: 13px; }
-  .navLink, .navLinkActive { min-width: 0; border-left: 0; border-bottom: 2px solid transparent; padding: 0 8px; overflow-wrap: anywhere; }
-  .navLinkActive { border-bottom-color: #8bd4c0; }
+  .sidebar { width: 100%; min-height: 0; padding: 14px 16px 0; border-right: 0; border-bottom: 1px solid rgba(227, 235, 241, .13); }
+  .brand { padding-bottom: 12px; }
+  .commandPanel { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .commandPanel div { grid-template-columns: 1fr; gap: 2px; }
+  .navBlock { margin-top: 16px; }
+  .nav { display: flex; gap: 4px; padding-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+  .nav::-webkit-scrollbar { display: none; }
+  .navLink, .navLinkActive { justify-content: center; min-width: 92px; padding: 0 12px; }
   .sidebarFooter { display: none; }
   .topbar { min-height: 48px; padding: 0 18px; }
-  .topbarContext span:not(.topbarKicker) { display: none; }
-  .topbarDivider { display: none; }
-  .main { padding: 28px 18px 42px; }
+  .main { padding: 26px 18px 42px; }
 }
 
-@media (max-width: 520px) {
+@media (max-width: 640px) {
+  .commandPanel { display: none; }
+  .topbarContext span:not(.topbarKicker), .topbarDivider { display: none; }
+}
+
+@media (max-width: 460px) {
   .brandBadge { display: none; }
-  .topbar { padding: 0 16px; }
-  .streamStatus span { display: none; }
+  .topbar { padding: 0 14px; }
   .roleBadge { display: none; }
-}
-
-@media (max-width: 420px) {
-  .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -2,7 +2,7 @@ export const INCIDENT_STATUS_LABELS: Record<string, string> = {
   DETECTED: '已发现',
   TRIAGING: '分诊中',
   DIAGNOSING: '调查中',
-  PLAN_PROPOSED: '方案待审批',
+  PLAN_PROPOSED: '方案待确认',
   AWAITING_APPROVAL: '待审批',
   EXECUTING: '执行中',
   VERIFYING: '验证中',
@@ -27,8 +27,8 @@ export const ROLE_LABELS: Record<string, string> = {
 
 export const RISK_LABELS: Record<string, string> = {
   R0: '只读',
-  R1: '可回滚 · 需审批',
-  R2: '高风险 · 已禁用',
+  R1: '可回滚 / 需审批',
+  R2: '高风险 / 已禁用',
   R3: '禁止执行',
 }
 
@@ -50,12 +50,24 @@ const SERVICE_LABELS: Record<string, string> = {
 }
 
 const SCENARIO_LABELS: Record<string, string> = {
-  'payment-latency@1': '支付服务变慢',
+  'payment-latency@1': '支付服务响应变慢',
   'order-db-errors@1': '订单服务报错',
   'inventory-split-brain@1': '库存数据不一致',
-  'payment-pod-crash@1': '支付服务崩溃',
-  'inventory-cpu-saturation@1': '库存服务太忙',
-  'order-bad-deployment@1': '订单服务版本有问题',
+  'payment-pod-crash@1': '支付服务实例崩溃',
+  'inventory-cpu-saturation@1': '库存服务资源紧张',
+  'order-bad-deployment@1': '订单服务版本异常',
+}
+
+const DESCRIPTION_LABELS: Record<string, string> = {
+  'Payment API High Latency': '支付服务响应变慢',
+  'Order Service 5xx Error Rate': '订单服务频繁报错',
+  'Inventory Stock Sync Lag': '库存同步变慢',
+  'Inventory CPU Saturation': '库存服务资源紧张',
+  'Payment API High Latency 指标异常': '支付服务响应时间异常',
+  'payment-api 日志出现连续超时或错误': '支付服务日志持续出现超时和错误',
+  '跨服务 Trace 将慢点收敛到同一依赖调用': '多条调用链指向同一依赖服务',
+  'payment-api 的依赖调用异常是当前事故的主要根因': '支付服务依赖的另一个服务响应变慢，疑似为主要原因',
+  '其他业务服务基线正常': '其他服务目前未发现异常',
 }
 
 export function serviceLabel(value: unknown) {
@@ -69,20 +81,8 @@ export function serviceLabel(value: unknown) {
 
 export function incidentDescription(value: unknown) {
   const text = String(value || '暂时没有更多说明')
-  const titles: Record<string, string> = {
-    'Payment API High Latency': '支付服务响应变慢',
-    'Order Service 5xx Error Rate': '订单服务频繁报错',
-    'Inventory Stock Sync Lag': '库存同步变慢',
-    'Inventory CPU Saturation': '库存服务太忙',
-    'Payment API High Latency 指标异常': '支付服务响应时间异常',
-    'payment-api 日志出现连续超时或错误': '支付服务日志持续出现超时和错误',
-    '跨服务 Trace 将慢点收敛到同一依赖调用': '多条调用链指向同一依赖服务',
-    'payment-api 的依赖调用异常是当前事故的主要根因': '支付服务依赖的另一个服务响应变慢，疑似为主要原因',
-    '其他业务服务基线正常': '其他服务目前未发现异常',
-  }
-  if (titles[text]) return titles[text]
+  if (DESCRIPTION_LABELS[text]) return DESCRIPTION_LABELS[text]
   return text
-    .replace(/payment-api 的依赖调用异常是当前事故的主要根因/g, '支付服务依赖的另一个服务响应变慢，疑似为主要原因')
     .replace(/payment-api/g, '支付服务')
     .replace(/inventory-api/g, '库存服务')
     .replace(/order-api/g, '订单服务')
@@ -91,14 +91,14 @@ export function incidentDescription(value: unknown) {
     .replace(/Inventory/g, '库存服务')
     .replace(/High Latency/g, '响应变慢')
     .replace(/\bTrace\b/g, '调用链')
-    .replace(/\bp99\s*延迟/gi, '响应时间')
+    .replace(/\bp99\s*(?:latency|延迟)/gi, '响应时间')
     .replace(/\bp99\b/gi, '响应时间')
-    .replace(/\b5xx\s*错误率/gi, '报错比例')
+    .replace(/\b5xx\s*(?:error rate|错误率)/gi, '报错比例')
     .replace(/\b5xx\b/gi, '报错')
-    .replace(/CPU 使用率持续 >95%/g, '资源使用率持续很高')
+    .replace(/(?:CPU usage sustained|CPU 使用率持续) >95%/g, '资源使用率持续很高')
     .replace(/\bCPU\b/g, '资源使用情况')
-    .replace(/依赖调用/g, '依赖服务')
-    .replace(/库存同步延迟/g, '库存同步时间')
+    .replace(/dependency call|依赖调用/gi, '依赖服务')
+    .replace(/stock sync lag|库存同步延迟/gi, '库存同步时间')
 }
 
 export function scenarioLabel(value: string) {
@@ -121,7 +121,7 @@ export function actionLabel(runbookRef: unknown) {
   const value = String(runbookRef || '')
   if (value.includes('scale')) return '扩容服务'
   if (value.includes('rollback')) return '回滚版本'
-  if (value === 'no_op') return '自动恢复'
+  if (value === 'no_op') return '无需执行'
   if (value.includes('restart')) return '重启服务'
   return '恢复服务'
 }
@@ -144,7 +144,7 @@ export function actorLabel(actor: unknown) {
   if (value.includes('system') || value.includes('alert')) return '系统'
   if (value.includes('scenario')) return '演练程序'
   if (value.includes('diagnostic') || value.includes('investigator')) return '调查服务'
-  return '处理系统'
+  return '处置系统'
 }
 
 export function countEvidence(value: unknown) {
