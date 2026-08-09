@@ -23,7 +23,7 @@ def compute_plan_hash(
     runbook_ref: str,
     target: str,
     parameters: dict,
-    incident_id: UUID,
+    incident_id: UUID | str,
 ) -> str:
     """
     计算恢复计划的规范哈希。

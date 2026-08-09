@@ -36,6 +36,84 @@ class IncidentSeverity(str, Enum):
     INFO = "info"
 
 
+class IncidentPhase(str, Enum):
+    """面向指挥台的规范处置阶段。"""
+
+    DETECT = "detect"
+    INVESTIGATE = "investigate"
+    PLAN = "plan"
+    APPROVE = "approve"
+    EXECUTE = "execute"
+    VERIFY = "verify"
+
+
+class SourceMode(str, Enum):
+    """读模型数据的真实性来源。"""
+
+    FIXTURE = "fixture"
+    OBSERVED = "observed"
+
+
+class EnvironmentBoundary(BaseModel):
+    profile: str
+    data_scope: str
+    source_mode: SourceMode
+
+
+class NextDecision(BaseModel):
+    kind: str
+    title: str
+    reason: str
+    target_href: Optional[str] = None
+
+
+class IncidentCapabilities(BaseModel):
+    can_decide_approval: bool = False
+    can_view_raw_evidence: bool = True
+    denial_reason: Optional[str] = None
+
+
+class ActiveApprovalSummary(BaseModel):
+    id: str
+    runbook_ref: str
+    target: str
+    risk_level: RiskLevel
+    expires_at: datetime
+    plan_hash: str
+
+
+class IncidentMilestone(BaseModel):
+    id: str
+    phase: IncidentPhase
+    state: str
+    occurred_at: datetime
+    summary: str
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_kind: str
+    source_mode: SourceMode
+
+
+class ImpactSummary(BaseModel):
+    summary: str
+    observed_at: datetime
+    source_mode: SourceMode
+
+
+class HypothesisSummary(BaseModel):
+    statement: str
+    confidence: Optional[float] = None
+    supporting_evidence_count: int = 0
+    opposing_evidence: Optional[str] = None
+    source_mode: SourceMode
+
+
+class VerificationSummary(BaseModel):
+    passed: bool
+    window_seconds: Optional[int] = None
+    recovery_actor: Optional[str] = None
+    source_mode: SourceMode
+
+
 class AlertSource(BaseModel):
     """告警来源信息。"""
 

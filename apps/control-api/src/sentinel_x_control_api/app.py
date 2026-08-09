@@ -32,6 +32,19 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from sentinel_x_contracts import (
+    ActiveApprovalSummary,
+    EnvironmentBoundary,
+    HypothesisSummary,
+    ImpactSummary,
+    IncidentCapabilities,
+    IncidentMilestone,
+    IncidentPhase,
+    NextDecision,
+    SourceMode,
+    VerificationSummary,
+)
+from sentinel_x_domain.services import compute_plan_hash
 
 # ---------------------------------------------------------------------------
 # 精简内联模型 — 避免依赖 contracts 包的导入问题
@@ -94,6 +107,17 @@ class IncidentResponse(BaseModel):
     resolved_at: Optional[datetime] = None
     workflow_id: Optional[str] = None
     version: int = 1
+
+
+class IncidentOverviewResponse(IncidentResponse):
+    environment: EnvironmentBoundary
+    impact: Optional[ImpactSummary] = None
+    top_hypothesis: Optional[HypothesisSummary] = None
+    next_decision: NextDecision
+    active_approval: Optional[ActiveApprovalSummary] = None
+    latest_verification: Optional[VerificationSummary] = None
+    capabilities: IncidentCapabilities
+    milestones: list[IncidentMilestone] = Field(default_factory=list)
 
 
 class IncidentListResponse(BaseModel):
@@ -496,25 +520,6 @@ def _store_demo_scenarios(store: InMemoryStore) -> None:
         store.add_scenario(s)
 
 
-def _compute_plan_hash(
-    runbook_ref: str,
-    target: str,
-    parameters: dict,
-    incident_id: str,
-) -> str:
-    """生成与 Action Gateway 约定一致的演示计划哈希。"""
-    canonical = json.dumps(
-        {
-            "runbook_ref": runbook_ref,
-            "target": target,
-            "parameters": parameters,
-            "incident_id": incident_id,
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(canonical.encode()).hexdigest()
-
-
 store = InMemoryStore()
 ALERT_INGRESS_HMAC_KEY = os.getenv("ALERT_INGRESS_HMAC_KEY")
 ALERT_INGRESS_CLOCK_SKEW_SECONDS = 300
@@ -591,6 +596,220 @@ async def _verify_alert_ingress(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 签名无效")
 
 
+_PHASE_ORDER = [
+    IncidentPhase.DETECT,
+    IncidentPhase.INVESTIGATE,
+    IncidentPhase.PLAN,
+    IncidentPhase.APPROVE,
+    IncidentPhase.EXECUTE,
+    IncidentPhase.VERIFY,
+]
+
+
+def _phase_for_status(incident_status: IncidentStatus) -> IncidentPhase:
+    if incident_status in {IncidentStatus.DETECTED, IncidentStatus.TRIAGING}:
+        return IncidentPhase.DETECT
+    if incident_status == IncidentStatus.DIAGNOSING:
+        return IncidentPhase.INVESTIGATE
+    if incident_status == IncidentStatus.PLAN_PROPOSED:
+        return IncidentPhase.PLAN
+    if incident_status == IncidentStatus.AWAITING_APPROVAL:
+        return IncidentPhase.APPROVE
+    if incident_status == IncidentStatus.EXECUTING:
+        return IncidentPhase.EXECUTE
+    return IncidentPhase.VERIFY
+
+
+def _phase_for_event(event: TimelineEvent) -> Optional[IncidentPhase]:
+    event_phases = {
+        "incident.created": IncidentPhase.DETECT,
+        "scenario.started": IncidentPhase.DETECT,
+        "evidence.collected": IncidentPhase.INVESTIGATE,
+        "hypothesis.generated": IncidentPhase.INVESTIGATE,
+        "plan.proposed": IncidentPhase.PLAN,
+        "approval.requested": IncidentPhase.APPROVE,
+        "approval.decided": IncidentPhase.APPROVE,
+        "action.started": IncidentPhase.EXECUTE,
+        "action.completed": IncidentPhase.EXECUTE,
+        "recovery.verified": IncidentPhase.VERIFY,
+    }
+    if event.event_type != "incident.status_changed":
+        return event_phases.get(event.event_type)
+    target = event.payload.get("to")
+    try:
+        target_status = IncidentStatus(target)
+        if target_status in {
+            IncidentStatus.RESOLVED,
+            IncidentStatus.ESCALATED,
+            IncidentStatus.FAILED,
+        }:
+            return _phase_for_status(IncidentStatus(event.payload.get("from")))
+        return _phase_for_status(target_status)
+    except (TypeError, ValueError):
+        return None
+
+
+def _milestone_summary(event: TimelineEvent) -> str:
+    payload = event.payload
+    if event.event_type == "incident.created":
+        return "故障已创建"
+    if event.event_type == "scenario.started":
+        return "演练故障已启动"
+    if event.event_type == "incident.status_changed":
+        return str(payload.get("reason") or "处置阶段已更新")
+    if event.event_type == "evidence.collected":
+        return str(payload.get("summary") or "调查证据已收集")
+    if event.event_type == "hypothesis.generated":
+        return str(payload.get("statement") or "形成待验证判断")
+    if event.event_type == "approval.requested":
+        return f"等待审批 {payload.get('runbook_ref', '恢复操作')}"
+    if event.event_type == "approval.decided":
+        return "恢复操作已批准" if payload.get("approved") else "恢复操作已拒绝"
+    if event.event_type == "action.started":
+        return "恢复操作开始执行"
+    if event.event_type == "action.completed":
+        return "恢复操作执行完成"
+    if event.event_type == "recovery.verified":
+        return "恢复窗口验证完成"
+    return "处置记录已更新"
+
+
+def _milestone_evidence_refs(event: TimelineEvent) -> list[str]:
+    payload = event.payload
+    if event.event_type == "evidence.collected" and payload.get("evidence_id"):
+        return [str(payload["evidence_id"])]
+    refs = payload.get("supporting_evidence")
+    if isinstance(refs, list):
+        return [str(ref) for ref in refs]
+    return []
+
+
+def _build_milestones(incident: StoredIncident) -> list[IncidentMilestone]:
+    phased_events = [
+        (event, phase)
+        for event in incident.timeline
+        if (phase := _phase_for_event(event)) is not None
+    ]
+    current_phase = (
+        phased_events[-1][1]
+        if incident.status in {IncidentStatus.ESCALATED, IncidentStatus.FAILED} and phased_events
+        else _phase_for_status(incident.status)
+    )
+    current_index = _PHASE_ORDER.index(current_phase)
+    by_phase: dict[IncidentPhase, IncidentMilestone] = {}
+    source_kinds = {
+        IncidentPhase.DETECT: "alert",
+        IncidentPhase.INVESTIGATE: "hypothesis",
+        IncidentPhase.PLAN: "plan",
+        IncidentPhase.APPROVE: "approval",
+        IncidentPhase.EXECUTE: "action",
+        IncidentPhase.VERIFY: "verification",
+    }
+    for event, phase in phased_events:
+        phase_index = _PHASE_ORDER.index(phase)
+        state = "current" if phase_index == current_index else "complete"
+        if (
+            incident.status in {IncidentStatus.ESCALATED, IncidentStatus.FAILED}
+            and phase == current_phase
+        ):
+            state = "failed"
+        by_phase[phase] = IncidentMilestone(
+            id=event.id,
+            phase=phase,
+            state=state,
+            occurred_at=event.timestamp,
+            summary=_milestone_summary(event),
+            evidence_refs=_milestone_evidence_refs(event),
+            source_kind=source_kinds[phase],
+            source_mode=SourceMode.FIXTURE,
+        )
+    return [by_phase[phase] for phase in _PHASE_ORDER if phase in by_phase]
+
+
+def _active_approval(incident_id: str) -> Optional[dict]:
+    pending = [
+        approval
+        for approval in store._approvals.values()
+        if approval["incident_id"] == incident_id and approval["status"] == "pending"
+    ]
+    return min(pending, key=lambda item: item["expires_at"]) if pending else None
+
+
+def _latest_event(incident: StoredIncident, event_type: str) -> Optional[TimelineEvent]:
+    return next(
+        (event for event in reversed(incident.timeline) if event.event_type == event_type),
+        None,
+    )
+
+
+def _top_hypothesis(incident: StoredIncident) -> Optional[HypothesisSummary]:
+    event = _latest_event(incident, "hypothesis.generated")
+    if event is None:
+        return None
+    refs = event.payload.get("supporting_evidence")
+    supporting_count = len(refs) if isinstance(refs, list) else int(refs or 0)
+    confidence = event.payload.get("confidence")
+    return HypothesisSummary(
+        statement=str(event.payload.get("statement") or "证据不足"),
+        confidence=float(confidence) if confidence is not None else None,
+        supporting_evidence_count=supporting_count,
+        opposing_evidence=(
+            str(event.payload["opposing_evidence"])
+            if event.payload.get("opposing_evidence") is not None
+            else None
+        ),
+        source_mode=SourceMode.FIXTURE,
+    )
+
+
+def _latest_verification(incident: StoredIncident) -> Optional[VerificationSummary]:
+    event = _latest_event(incident, "recovery.verified")
+    if event is None:
+        return None
+    result = event.payload.get("result")
+    return VerificationSummary(
+        passed=result is True or result == "passed",
+        window_seconds=(
+            int(event.payload["window_seconds"])
+            if event.payload.get("window_seconds") is not None
+            else None
+        ),
+        recovery_actor=event.actor,
+        source_mode=SourceMode.FIXTURE,
+    )
+
+
+def _next_decision(incident: StoredIncident, approval: Optional[dict]) -> NextDecision:
+    if approval:
+        return NextDecision(
+            kind="review_approval",
+            title="核对并决定恢复操作",
+            reason="恢复操作在审批通过前不会执行。",
+            target_href="#approval-section",
+        )
+    decisions = {
+        IncidentStatus.DETECTED: ("investigate", "开始确认影响", "等待进入调查阶段。"),
+        IncidentStatus.TRIAGING: ("investigate", "确认故障范围", "正在收集初始信号。"),
+        IncidentStatus.DIAGNOSING: ("investigate", "等待调查结论", "正在关联调查证据。"),
+        IncidentStatus.PLAN_PROPOSED: ("investigate", "核对恢复方案", "恢复方案尚未提交审批。"),
+        IncidentStatus.EXECUTING: ("wait_execution", "等待操作完成", "恢复操作正在执行。"),
+        IncidentStatus.VERIFYING: (
+            "review_verification",
+            "等待恢复验证",
+            "需要完整观察窗口确认恢复。",
+        ),
+        IncidentStatus.RESOLVED: (
+            "review_verification",
+            "查看恢复结果",
+            "故障已进入终态，仍需核对验证证据。",
+        ),
+        IncidentStatus.ESCALATED: ("escalated", "交由人工处理", "系统已停止自动推进。"),
+        IncidentStatus.FAILED: ("failed", "检查失败原因", "处置流程未完成。"),
+    }
+    kind, title, reason = decisions[incident.status]
+    return NextDecision(kind=kind, title=title, reason=reason)
+
+
 # ---------------------------------------------------------------------------
 # 端点
 # ---------------------------------------------------------------------------
@@ -648,13 +867,18 @@ async def list_incidents(
     )
 
 
-@app.get("/api/incidents/{incident_id}")
-async def get_incident(incident_id: str):
+@app.get("/api/incidents/{incident_id}", response_model=IncidentOverviewResponse)
+async def get_incident(
+    incident_id: str,
+    role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
+):
     """事故详情。"""
     incident = store.get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
-    return IncidentResponse(
+    approval = _active_approval(incident_id)
+    normalized_role = role or "viewer"
+    return IncidentOverviewResponse(
         id=incident.id,
         fingerprint=incident.fingerprint,
         status=incident.status,
@@ -666,6 +890,41 @@ async def get_incident(incident_id: str):
         resolved_at=incident.resolved_at,
         workflow_id=incident.workflow_id,
         version=incident.version,
+        environment=EnvironmentBoundary(
+            profile=os.getenv("SENTINEL_PROFILE", "light"),
+            data_scope="exercise",
+            source_mode=SourceMode.FIXTURE,
+        ),
+        impact=ImpactSummary(
+            summary=incident.description,
+            observed_at=incident.updated_at,
+            source_mode=SourceMode.FIXTURE,
+        ),
+        top_hypothesis=_top_hypothesis(incident),
+        next_decision=_next_decision(incident, approval),
+        active_approval=(
+            ActiveApprovalSummary(
+                id=approval["id"],
+                runbook_ref=approval["runbook_ref"],
+                target=approval["target"],
+                risk_level=approval["risk_level"],
+                expires_at=approval["expires_at"],
+                plan_hash=approval["plan_hash"],
+            )
+            if approval
+            else None
+        ),
+        latest_verification=_latest_verification(incident),
+        capabilities=IncidentCapabilities(
+            can_decide_approval=bool(approval and normalized_role == "approver"),
+            can_view_raw_evidence=True,
+            denial_reason=(
+                None
+                if normalized_role == "approver"
+                else "当前角色不能提交审批决定"
+            ),
+        ),
+        milestones=_build_milestones(incident),
     )
 
 
@@ -913,7 +1172,7 @@ async def run_scenario(
                 target=target,
                 parameters=parameters,
                 risk_level=RiskLevel.R1,
-                plan_hash=_compute_plan_hash(runbook_ref, target, parameters, incident.id),
+                plan_hash=compute_plan_hash(runbook_ref, target, parameters, incident.id),
                 hypothesis_id=f"hyp-{incident.id[:8]}",
             ),
         )
@@ -1119,7 +1378,7 @@ async def seed_demo_data():
                     target=target,
                     parameters=parameters,
                     risk_level=RiskLevel.R1,
-                    plan_hash=_compute_plan_hash(runbook_ref, target, parameters, incident.id),
+                    plan_hash=compute_plan_hash(runbook_ref, target, parameters, incident.id),
                     hypothesis_id=f"hyp-{incident.id[:8]}",
                 ),
             )
@@ -1135,7 +1394,7 @@ async def seed_demo_data():
                     target=target,
                     parameters=parameters,
                     risk_level=RiskLevel.R1,
-                    plan_hash=_compute_plan_hash(runbook_ref, target, parameters, incident.id),
+                    plan_hash=compute_plan_hash(runbook_ref, target, parameters, incident.id),
                     hypothesis_id=f"hyp-{incident.id[:8]}",
                 ),
                 allow_terminal_fixture=True,

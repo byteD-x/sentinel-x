@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Sentinel-X Control API — HTTP/SSE interface"
 requires-python = ">=3.13"
 dependencies = [
+    "sentinel-x-domain>=0.1",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "pydantic>=2",

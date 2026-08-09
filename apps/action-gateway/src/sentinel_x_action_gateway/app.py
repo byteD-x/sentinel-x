@@ -21,7 +21,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import asyncio
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -33,6 +32,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
+from sentinel_x_domain.services import compute_plan_hash
 
 logger = logging.getLogger("sentinel_x_action_gateway")
 
@@ -294,7 +294,7 @@ class ActionGate:
             return False, f"参数校验失败: {'; '.join(param_errors)}", None
 
         # 6. Plan hash 一致性（防止审批后计划被篡改）
-        expected_hash = self._compute_plan_hash(
+        expected_hash = compute_plan_hash(
             req.runbook_ref, req.target, req.parameters, req.incident_id
         )
         if req.plan_hash != expected_hash:
@@ -344,22 +344,6 @@ class ActionGate:
                     errors.append(f"参数 {key} 大于最大值 {prop['maximum']}")
 
         return errors
-
-    @staticmethod
-    def _compute_plan_hash(
-        runbook_ref: str, target: str, parameters: dict, incident_id: str
-    ) -> str:
-        """计算计划的规范哈希。"""
-        canonical = json.dumps(
-            {
-                "runbook_ref": runbook_ref,
-                "target": target,
-                "parameters": parameters,
-                "incident_id": incident_id,
-            },
-            sort_keys=True,
-        )
-        return hashlib.sha256(canonical.encode()).hexdigest()
 
     async def execute(
         self, runbook: RunbookDefinition, req: ActionSubmitRequest

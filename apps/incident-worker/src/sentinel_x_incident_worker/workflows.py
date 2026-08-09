@@ -13,8 +13,6 @@ Workflow 内只保存确定性逻辑（状态机转换、条件判断），
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -27,6 +25,7 @@ from sentinel_x_domain.state_machine import (
     IncidentStatus,
     TERMINAL_STATUSES,
 )
+from sentinel_x_domain.services import compute_plan_hash
 from sentinel_x_policy import (
     RiskLevel,
     check_mvp_policy,
@@ -429,13 +428,13 @@ class IncidentWorkflow:
         target = hypothesis.affected_service
 
         plan_id = str(uuid4())
-        plan_hash = hashlib.sha256(
-            json.dumps({
-                "runbook": runbook,
-                "target": target,
-                "plan_id": plan_id,
-            }, sort_keys=True).encode()
-        ).hexdigest()[:16]
+        parameters = {"reason": hypothesis.statement}
+        plan_hash = compute_plan_hash(
+            runbook,
+            target,
+            parameters,
+            self.ctx.incident_id,
+        )
 
         # no_op 是自动恢复场景，无需策略校验
         if runbook == "no_op":
@@ -443,7 +442,7 @@ class IncidentWorkflow:
                 plan_id=plan_id,
                 runbook_ref=runbook,
                 target=target,
-                parameters={"reason": hypothesis.statement},
+                parameters=parameters,
                 risk_level=RiskLevel.R0.value,
                 plan_hash=plan_hash,
                 policy_allowed=True,
@@ -457,7 +456,7 @@ class IncidentWorkflow:
             plan_id=plan_id,
             runbook_ref=runbook,
             target=target,
-            parameters={"reason": hypothesis.statement},
+            parameters=parameters,
             risk_level=decision.risk_level.value,
             plan_hash=plan_hash,
             policy_allowed=decision.allowed,

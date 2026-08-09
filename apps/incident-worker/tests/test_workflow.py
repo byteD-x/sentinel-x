@@ -5,8 +5,10 @@ Incident Workflow 测试 — 覆盖完整流程、预算耗尽、策略拒绝、
 import pytest
 from uuid import uuid4
 
+from sentinel_x_domain.services import compute_plan_hash
 from sentinel_x_domain.state_machine import IncidentState, IncidentStatus
 from sentinel_x_incident_worker.workflows import (
+    HypothesisResult,
     IncidentWorkflow,
     WorkflowContext,
 )
@@ -100,13 +102,40 @@ class TestKillSwitch:
 class TestPlanGeneration:
     """计划生成测试。"""
 
+    async def test_plan_hash_uses_shared_canonical_contract(self, fresh_ctx):
+        """相同计划不能因 plan_id 变化产生不同 hash。"""
+        workflow = IncidentWorkflow(fresh_ctx)
+        hypothesis = HypothesisResult(
+            hypothesis_id="hypothesis-001",
+            statement="inventory-api 进程内状态持续返回 5xx",
+            confidence=0.9,
+            root_cause_category="application",
+            affected_service="inventory-api",
+            supporting_evidence_ids=["evidence-001"],
+            opposing_evidence_ids=[],
+            suggested_next_steps=[],
+            needs_human_escalation=False,
+        )
+
+        first = await workflow._generate_plan_activity(hypothesis)
+        second = await workflow._generate_plan_activity(hypothesis)
+        expected = compute_plan_hash(
+            first.runbook_ref,
+            first.target,
+            first.parameters,
+            fresh_ctx.incident_id,
+        )
+
+        assert first.plan_hash == second.plan_hash == expected
+        assert len(first.plan_hash) == 64
+
     async def test_plan_has_hash(self, fresh_ctx):
         """生成的计划应包含 plan_hash。"""
         wf = IncidentWorkflow(fresh_ctx)
         await wf.execute()
         if fresh_ctx.plan:
             assert fresh_ctx.plan.plan_hash
-            assert len(fresh_ctx.plan.plan_hash) == 16
+            assert len(fresh_ctx.plan.plan_hash) == 64
 
     async def test_plan_is_policy_checked(self, fresh_ctx):
         """计划应经过策略校验。"""

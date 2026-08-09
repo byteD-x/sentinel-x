@@ -5,12 +5,12 @@ Action Gateway 测试 — 覆盖完整校验链和安全边界。
 import hashlib
 import hmac
 import asyncio
-import json
 from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from sentinel_x_action_gateway.app import app, store, gate
+from sentinel_x_domain.services import compute_plan_hash
 
 
 @pytest.fixture(autouse=True)
@@ -32,13 +32,7 @@ async def client():
 
 
 def _make_plan_hash(runbook_ref: str, target: str, parameters: dict, incident_id: str) -> str:
-    canonical = json.dumps({
-        "runbook_ref": runbook_ref,
-        "target": target,
-        "parameters": parameters,
-        "incident_id": incident_id,
-    }, sort_keys=True)
-    return hashlib.sha256(canonical.encode()).hexdigest()
+    return compute_plan_hash(runbook_ref, target, parameters, incident_id)
 
 
 def _make_request(

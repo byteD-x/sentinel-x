@@ -158,6 +158,8 @@ filters：`status[]`、`severity[]`、`service[]`、`awaiting_approval`、`exerc
 
 返回事故读模型、当前 capabilities、top hypothesis、预算、活动 plan/approval/action、最新 VerificationResult 和 source freshness。ETag 为 projection version。
 
+当前 light `GET /api/incidents/{incident_id}` 已在保留原顶层字段的基础上返回 `environment`、`impact`、`top_hypothesis`、`next_decision`、`active_approval`、`latest_verification`、`capabilities` 和按处置阶段折叠的 `milestones`。所有由内存演练事件生成的摘要显式标记 `source_mode=fixture`；light 响应尚无预算、真实 source freshness、ETag 或持久投影，不能视为正式 `/api/v1` 契约完成。
+
 ### `POST /api/v1/incidents/{incident_id}/commands`
 
 调用者：responder。显式命令替代含糊的“启动调查”端点：

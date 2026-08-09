@@ -6,6 +6,7 @@ import time
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sentinel_x_domain.services import compute_plan_hash
 
 import sentinel_x_control_api.app as control_module
 
@@ -176,6 +177,39 @@ class TestIncidents:
         assert response.status_code == 200
         data = response.json()
         assert len(data["events"]) >= 1  # incident.created 事件
+
+    async def test_overview_does_not_invent_missing_diagnosis_or_verification(self, client):
+        created = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "test-overview-empty",
+                "fingerprint": "fp-overview-empty",
+                "alert_name": "Overview Empty",
+                "severity": "warning",
+                "description": "Only alert context is available",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        })
+
+        response = await client.get(f"/api/incidents/{created.json()['id']}")
+
+        assert response.status_code == 200
+        overview = response.json()
+        assert overview["top_hypothesis"] is None
+        assert overview["latest_verification"] is None
+        assert [milestone["phase"] for milestone in overview["milestones"]] == ["detect"]
+
+    async def test_viewer_cannot_decide_pending_approval(self, client):
+        started = await client.post(
+            "/api/scenarios/order-db-errors@1/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+
+        response = await client.get(f"/api/incidents/{started.json()['incident_id']}")
+
+        assert response.status_code == 200
+        capabilities = response.json()["capabilities"]
+        assert capabilities["can_decide_approval"] is False
+        assert capabilities["denial_reason"] == "当前角色不能提交审批决定"
 
 
 @pytest.mark.asyncio
@@ -379,6 +413,12 @@ class TestScenarios:
         approvals = approvals_response.json()["items"]
         assert len(approvals) == 1
         assert approvals[0]["runbook_ref"] == "restart_deployment@1"
+        assert approvals[0]["plan_hash"] == compute_plan_hash(
+            approvals[0]["runbook_ref"],
+            approvals[0]["target"],
+            approvals[0]["parameters"],
+            incident_id,
+        )
 
         approve_response = await client.put(
             f"/api/incidents/{incident_id}/approvals/{approvals[0]['id']}",
@@ -393,6 +433,75 @@ class TestScenarios:
         final_timeline = await client.get(f"/api/incidents/{incident_id}/timeline")
         final_event_types = {event["event_type"] for event in final_timeline.json()["events"]}
         assert {"action.started", "action.completed", "recovery.verified"} <= final_event_types
+
+    async def test_incident_overview_exposes_pending_decision_context(self, client):
+        started = await client.post(
+            "/api/scenarios/order-db-errors@1/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+        incident_id = started.json()["incident_id"]
+
+        response = await client.get(
+            f"/api/incidents/{incident_id}",
+            headers={"X-Sentinel-Role": "approver"},
+        )
+
+        assert response.status_code == 200
+        overview = response.json()
+        assert overview["id"] == incident_id
+        assert overview["status"] == "AWAITING_APPROVAL"
+        assert overview["environment"] == {
+            "profile": "light",
+            "data_scope": "exercise",
+            "source_mode": "fixture",
+        }
+        assert overview["next_decision"]["kind"] == "review_approval"
+        assert overview["active_approval"]["runbook_ref"] == "restart_deployment@1"
+        assert overview["capabilities"]["can_decide_approval"] is True
+        assert [milestone["phase"] for milestone in overview["milestones"]] == [
+            "detect",
+            "investigate",
+            "plan",
+            "approve",
+        ]
+
+    async def test_resolved_overview_exposes_fixture_verification(self, client):
+        started = await client.post(
+            "/api/scenarios/payment-pod-crash@1/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+        incident_id = started.json()["incident_id"]
+
+        response = await client.get(f"/api/incidents/{incident_id}")
+
+        assert response.status_code == 200
+        overview = response.json()
+        assert overview["status"] == "RESOLVED"
+        assert overview["next_decision"]["kind"] == "review_verification"
+        assert overview["impact"]["source_mode"] == "fixture"
+        assert overview["top_hypothesis"]["source_mode"] == "fixture"
+        assert overview["latest_verification"] == {
+            "passed": True,
+            "window_seconds": 60,
+            "recovery_actor": "verification_fixture",
+            "source_mode": "fixture",
+        }
+
+    async def test_escalated_overview_marks_last_real_phase_failed(self, client):
+        started = await client.post(
+            "/api/scenarios/order-bad-deployment@1/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+        incident_id = started.json()["incident_id"]
+
+        response = await client.get(f"/api/incidents/{incident_id}")
+
+        assert response.status_code == 200
+        overview = response.json()
+        assert overview["status"] == "ESCALATED"
+        assert overview["next_decision"]["kind"] == "escalated"
+        assert overview["milestones"][-1]["phase"] == "plan"
+        assert overview["milestones"][-1]["state"] == "failed"
 
 
 @pytest.mark.asyncio

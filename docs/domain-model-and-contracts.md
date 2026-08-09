@@ -44,6 +44,7 @@ DETECTED
 | `ScenarioDefinition` | `id`, `version`, `fault_type`, `target`, `expected_root_cause`, `expected_evidence`, `allowed_actions`, `recovery_assertions`, `cleanup` |
 | `ExerciseRun` | `id`, `scenario_ref`, `environment_id`, `status`, `started_at`, `finished_at` |
 | `Incident` | `id`, `status`, `severity`, `service`, `alert_fingerprint`, `workflow_id`, `opened_at`, `closed_at` |
+| `IncidentOverview` | `environment`, `impact`, `top_hypothesis`, `next_decision`, `active_approval`, `latest_verification`, `capabilities`, `milestones` |
 | `Evidence` | `id`, `incident_id`, `type`, `source`, `query`, `time_range`, `summary`, `content_hash`, `source_ref` |
 | `Hypothesis` | `id`, `statement`, `confidence`, `supporting_evidence_ids`, `contradicting_evidence_ids`, `status` |
 | `DiagnosticStep` | `id`, `tool`, `typed_parameters`, `result_ref`, `duration_ms`, `status`, `error_code` |
