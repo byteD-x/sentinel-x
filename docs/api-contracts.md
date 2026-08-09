@@ -244,6 +244,12 @@ approver 查看 `PENDING` 请求，可按过期时间、risk 和 service 筛选�
 
 ground truth 端点仅 Evaluator 的内部身份可读，不由浏览器或 Investigator 访问。
 
+### 当前 light 场景目录实现
+
+当前 `GET /api/scenarios` 和 `POST /api/scenarios/{scenario_id}/run` 每次均从服务端固定的 YAML 目录读取严格场景契约，不再维护内存硬编码场景或从场景 ID 推导目标。列表只返回 ID、描述、故障分类、首个受限目标的 service/namespace 及允许的 Runbook；ground truth、预期证据、清理元数据和物理路径不会进入浏览器响应。
+
+light fixture 根据 YAML 的明确许可分支：`no_op` 从 `DIAGNOSING` 直接进入 `VERIFYING`，空许可列表升级人工，R1 创建审批，R2/R3 经 policy 拒绝并升级。它不注入真实故障、不执行 Kubernetes 动作，也不替代正式 `/api/v1`、持久化审批或 Scenario Runner。
+
 ### 当前 light 评测归档只读实现
 
 当前 Control API 提供 `GET /api/evaluations` 与 `GET /api/evaluations/{report_id}`。它们只读取服务端配置的 `SENTINEL_EVAL_ARCHIVE_DIR`，不接受路径、下载、重跑或删除参数。归档使用严格的 `schema_version: "1.0"`，API 对原始 JSON 字节计算 `sha256`；`raw_report`、ground truth、原始遥测、执行异常和物理路径不会进入浏览器响应。

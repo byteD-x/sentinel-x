@@ -6,6 +6,12 @@
 
 场景只运行在 `demo-shop` 隔离环境。Scenario Runner 的 **cleanup 是测试夹具清理**，不是 AI 恢复动作，不能计入 Sentinel-X 的恢复成功率。
 
+### 1.1 当前运行时来源
+
+`demo/scenarios/*.yaml` 是本地 light loader 与 Control API 的唯一运行时场景来源；本文保留业务语义、因果约束与验收口径。当前目录严格收敛为本章定义的六个 `name@version` 场景，加载器拒绝未知字段、未知根因分类和 ID/版本不一致。
+
+这一状态只证明 YAML 契约、公开投影和 light fixture 的政策分支已经过本地测试。它不证明故障已经在 Kubernetes 中注入、已完成 cleanup，或已得到真实 SLO 恢复证据。
+
 ## 2. 演练基线
 
 ### 2.1 固定业务拓扑

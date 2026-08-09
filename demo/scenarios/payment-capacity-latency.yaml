@@ -1,0 +1,23 @@
+name: "payment-capacity-latency@1"
+version: 1
+description: "payment-api 在固定负载阶跃下容量耗尽，延迟和排队时间持续上升。"
+category: resource
+faults:
+  - fault_type: load_surge
+    target_service: payment-api
+    target_namespace: demo-shop
+    parameters:
+      target_rps: 120
+      max_replicas: 3
+    duration_seconds: 300
+    cleanup_command: "scenario_runner:restore_baseline_load"
+ground_truth: "CAPACITY_EXHAUSTION + payment-api"
+expected_root_cause_category: CAPACITY_EXHAUSTION
+expected_evidence:
+  - "payment-api p95 延迟与队列长度上升"
+  - "payment-api 资源饱和且依赖保持健康"
+recovery_assertions:
+  - "payment-api p95 在负载保持时恢复"
+  - "订单成功率在观察窗口内恢复"
+allowlisted_runbooks:
+  - "scale_deployment@1"

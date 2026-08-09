@@ -47,6 +47,7 @@ testpaths = [
     "apps/action-gateway/tests",
     "apps/incident-worker/tests",
     "demo/services/tests",
+    "demo/scenarios/tests",
     "evals/tests",
 ]
 addopts = "--import-mode=importlib --asyncio-mode=auto"

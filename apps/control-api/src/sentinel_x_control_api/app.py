@@ -24,11 +24,11 @@ import os
 import random
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from enum import Enum
 from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 
+from demo.scenarios.loader import ScenarioLoadError, ScenarioLoader
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -38,14 +38,19 @@ from sentinel_x_contracts import (
     EnvironmentBoundary,
     HypothesisSummary,
     ImpactSummary,
+    IncidentSeverity,
+    IncidentStatus,
     IncidentCapabilities,
     IncidentMilestone,
     IncidentPhase,
     NextDecision,
     SourceMode,
+    RiskLevel,
     VerificationSummary,
 )
+from sentinel_x_contracts.scenario import ScenarioDefinition
 from sentinel_x_domain.services import compute_plan_hash
+from sentinel_x_policy import check_mvp_policy
 from sentinel_x_control_api.eval_archive import (
     EvaluationArchiveError,
     get_evaluation_archive,
@@ -55,6 +60,7 @@ from sentinel_x_control_api.eval_archive import (
 
 EVAL_ARCHIVE_DIR = Path(os.getenv("SENTINEL_EVAL_ARCHIVE_DIR", "evals/results"))
 EVAL_ARCHIVE_MAX_BYTES = int(os.getenv("SENTINEL_EVAL_ARCHIVE_MAX_BYTES", "2097152"))
+SCENARIOS_DIR = Path(__file__).resolve().parents[4] / "demo" / "scenarios"
 
 
 def _evaluation_archive_error_response(error: EvaluationArchiveError) -> JSONResponse:
@@ -64,36 +70,33 @@ def _evaluation_archive_error_response(error: EvaluationArchiveError) -> JSONRes
     )
 
 
+def _load_scenario_definitions() -> dict[str, ScenarioDefinition]:
+    """从本地 YAML 场景目录加载当前可运行的场景定义。"""
+    try:
+        scenarios = ScenarioLoader(SCENARIOS_DIR).load_all()
+    except ScenarioLoadError as exc:
+        raise HTTPException(status_code=503, detail="场景目录不可用") from exc
+    return {scenario.id: scenario for scenario in scenarios}
+
+
+def _public_scenario_projection(scenario: ScenarioDefinition) -> dict:
+    """投影场景的安全公开字段，排除评测与注入内部信息。"""
+    primary_fault = scenario.faults[0]
+    return {
+        "id": scenario.id,
+        "name": scenario.name,
+        "version": scenario.version,
+        "description": scenario.description,
+        "category": scenario.category.value,
+        "target_service": primary_fault.target_service,
+        "target_namespace": primary_fault.target_namespace,
+        "allowlisted_runbooks": list(scenario.allowlisted_runbooks),
+    }
+
+
 # ---------------------------------------------------------------------------
-# 精简内联模型 — 避免依赖 contracts 包的导入问题
-# 正式开发时替换为 from sentinel_x_contracts import ...
+# Control API 本地请求与响应模型；跨服务枚举直接复用 contracts。
 # ---------------------------------------------------------------------------
-
-
-class IncidentStatus(str, Enum):
-    DETECTED = "DETECTED"
-    TRIAGING = "TRIAGING"
-    DIAGNOSING = "DIAGNOSING"
-    PLAN_PROPOSED = "PLAN_PROPOSED"
-    AWAITING_APPROVAL = "AWAITING_APPROVAL"
-    EXECUTING = "EXECUTING"
-    VERIFYING = "VERIFYING"
-    RESOLVED = "RESOLVED"
-    ESCALATED = "ESCALATED"
-    FAILED = "FAILED"
-
-
-class RiskLevel(str, Enum):
-    R0 = "R0"
-    R1 = "R1"
-    R2 = "R2"
-    R3 = "R3"
-
-
-class IncidentSeverity(str, Enum):
-    CRITICAL = "critical"
-    WARNING = "warning"
-    INFO = "info"
 
 
 class StrictBaseModel(BaseModel):
@@ -179,12 +182,27 @@ class HypothesisResponse(BaseModel):
     generated_at: datetime
 
 
-class ScenarioResponse(BaseModel):
+class ScenarioResponse(StrictBaseModel):
     id: str
     name: str
     version: int
     description: str
     category: str
+    target_service: str
+    target_namespace: str
+    allowlisted_runbooks: list[str] = Field(default_factory=list)
+
+
+class ScenarioListResponse(StrictBaseModel):
+    items: list[ScenarioResponse]
+
+
+class ScenarioRunResponse(StrictBaseModel):
+    exercise_id: str
+    scenario_id: str
+    incident_id: str
+    status: str
+    message: str
 
 
 class HealthResponse(BaseModel):
@@ -226,7 +244,6 @@ class InMemoryStore:
         self._incidents: dict[str, StoredIncident] = {}
         self._fingerprint_index: dict[str, str] = {}
         self._approvals: dict[str, dict] = {}
-        self._scenarios: dict[str, dict] = {}
 
     def create_incident(self, data: IncidentCreate) -> StoredIncident:
         existing_id = self._fingerprint_index.get(data.alert_source.fingerprint)
@@ -329,7 +346,12 @@ class InMemoryStore:
         allowed = {
             IncidentStatus.DETECTED: {IncidentStatus.TRIAGING, IncidentStatus.FAILED},
             IncidentStatus.TRIAGING: {IncidentStatus.DIAGNOSING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
-            IncidentStatus.DIAGNOSING: {IncidentStatus.PLAN_PROPOSED, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+            IncidentStatus.DIAGNOSING: {
+                IncidentStatus.PLAN_PROPOSED,
+                IncidentStatus.VERIFYING,
+                IncidentStatus.ESCALATED,
+                IncidentStatus.FAILED,
+            },
             IncidentStatus.PLAN_PROPOSED: {IncidentStatus.AWAITING_APPROVAL, IncidentStatus.VERIFYING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
             IncidentStatus.AWAITING_APPROVAL: {IncidentStatus.EXECUTING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
             IncidentStatus.EXECUTING: {IncidentStatus.VERIFYING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
@@ -472,78 +494,14 @@ class InMemoryStore:
                 )
         return approval
 
-    def add_scenario(self, scenario: dict) -> None:
-        self._scenarios[scenario["id"]] = scenario
-
-    def list_scenarios(self) -> list[dict]:
-        return list(self._scenarios.values())
-
-
 # ---------------------------------------------------------------------------
 # 全局存储实例
 # ---------------------------------------------------------------------------
-
-def _store_demo_scenarios(store: InMemoryStore) -> None:
-    demo_scenarios = [
-        {
-            "id": "payment-latency@1",
-            "name": "payment-latency@1",
-            "version": 1,
-            "description": "Payment API 高延迟：inventory-api 网络超时导致级联延迟",
-            "category": "network",
-            "allowlisted_runbooks": ["restart_deployment@1"],
-        },
-        {
-            "id": "order-db-errors@1",
-            "name": "order-db-errors@1",
-            "version": 1,
-            "description": "Order Service 数据库连接池耗尽导致 5xx 错误",
-            "category": "database",
-            "allowlisted_runbooks": ["restart_deployment@1"],
-        },
-        {
-            "id": "inventory-split-brain@1",
-            "name": "inventory-split-brain@1",
-            "version": 1,
-            "description": "Redis 主从切换后 split-brain 导致库存数据不一致",
-            "category": "application",
-            "allowlisted_runbooks": ["restart_deployment@1"],
-        },
-        {
-            "id": "payment-pod-crash@1",
-            "name": "payment-pod-crash@1",
-            "version": 1,
-            "description": "Payment Pod 因 OOM 崩溃，Kubernetes 自动重启恢复",
-            "category": "kubernetes",
-            "allowlisted_runbooks": ["no_op"],
-        },
-        {
-            "id": "inventory-cpu-saturation@1",
-            "name": "inventory-cpu-saturation@1",
-            "version": 1,
-            "description": "Inventory CPU 饱和，需要扩容",
-            "category": "resource",
-            "allowlisted_runbooks": ["scale_deployment@1"],
-        },
-        {
-            "id": "order-bad-deployment@1",
-            "name": "order-bad-deployment@1",
-            "version": 1,
-            "description": "Order Service 错误部署导致持续失败，需人工回滚",
-            "category": "application",
-            "allowlisted_runbooks": ["db_rollback@1"],
-        },
-    ]
-    for s in demo_scenarios:
-        store.add_scenario(s)
 
 
 store = InMemoryStore()
 ALERT_INGRESS_HMAC_KEY = os.getenv("ALERT_INGRESS_HMAC_KEY")
 ALERT_INGRESS_CLOCK_SKEW_SECONDS = 300
-
-# 预置演示场景
-_store_demo_scenarios(store)
 
 
 # ---------------------------------------------------------------------------
@@ -1083,36 +1041,34 @@ async def list_all_approvals(
 
 # ---- 场景 ----
 
-@app.get("/api/scenarios")
+@app.get("/api/scenarios", response_model=ScenarioListResponse)
 async def list_scenarios():
-    """场景列表。"""
-    scenarios = store.list_scenarios()
-    return {"items": scenarios}
+    """返回从本地 YAML 加载的安全场景目录。"""
+    scenarios = _load_scenario_definitions()
+    return {"items": [_public_scenario_projection(scenario) for scenario in scenarios.values()]}
 
 
-@app.post("/api/scenarios/{scenario_id}/run", status_code=status.HTTP_202_ACCEPTED)
+@app.post(
+    "/api/scenarios/{scenario_id}/run",
+    response_model=ScenarioRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def run_scenario(
     scenario_id: str,
     role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
 ):
     """启动演练场景。"""
     _require_role(role, "scenario_operator")
-    scenario = store._scenarios.get(scenario_id)
+    scenario = _load_scenario_definitions().get(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"场景 {scenario_id} 不存在")
 
-    service_target = next(
-        (
-            service
-            for service in ("payment", "inventory", "order")
-            if service in scenario_id
-        ),
-        "order",
-    )
-    target = f"{service_target}-api"
+    primary_fault = scenario.faults[0]
+    target = primary_fault.target_service
+    target_namespace = primary_fault.target_namespace
     severity = (
         IncidentSeverity.CRITICAL
-        if scenario["category"] in {"database", "kubernetes", "resource"}
+        if scenario.category.value in {"database", "kubernetes", "resource"}
         else IncidentSeverity.WARNING
     )
     fingerprint = f"exercise:{scenario_id}"
@@ -1128,9 +1084,9 @@ async def run_scenario(
             alert_source=AlertSource(
                 alertmanager_id=f"scenario:{scenario_id}",
                 fingerprint=fingerprint,
-                alert_name=f"{target} / {scenario['name']}",
+                alert_name=f"{target} / {scenario.name}",
                 severity=severity,
-                description=scenario["description"],
+                description=scenario.description,
                 started_at=datetime.now(),
             )
         )
@@ -1139,12 +1095,17 @@ async def run_scenario(
         incident.id,
         "scenario.started",
         "scenario_runner",
-        {"scenario_id": scenario_id, "profile": "light", "target": target},
+        {
+            "scenario_id": scenario_id,
+            "profile": "light",
+            "target": target,
+            "target_namespace": target_namespace,
+        },
     )
     store.set_status(incident, IncidentStatus.TRIAGING, "故障注入已确认")
     store.set_status(incident, IncidentStatus.DIAGNOSING, "Agent 开始关联诊断信号")
 
-    evidence = scenario.get("expected_evidence") or [
+    evidence = [
         f"Prometheus: {target} 指标偏离基线",
         f"Loki: {target} 故障日志已归档",
         f"Tempo: {target} 依赖调用链异常",
@@ -1165,25 +1126,25 @@ async def run_scenario(
         "hypothesis.generated",
         "investigator_fixture",
         {
-            "statement": scenario["name"] + " 与目标服务异常信号一致",
+            "statement": scenario.name + " 与目标服务异常信号一致",
             "confidence": 0.88,
-            "category": scenario["category"],
+            "category": scenario.category.value,
             "affected_service": target,
             "supporting_evidence": len(evidence),
             "opposing_evidence": "payment-api / PostgreSQL 基线正常",
         },
     )
 
-    allowed_runbooks = scenario.get("allowlisted_runbooks", [])
+    allowed_runbooks = list(scenario.allowlisted_runbooks)
     runbook_ref = allowed_runbooks[0] if allowed_runbooks else "no_op"
-    store.set_status(incident, IncidentStatus.PLAN_PROPOSED, "形成受限恢复方案")
-    if runbook_ref == "db_rollback@1":
-        store.set_status(incident, IncidentStatus.ESCALATED, "R2 回滚在 MVP 中禁用")
+
+    if not allowed_runbooks:
+        store.set_status(incident, IncidentStatus.ESCALATED, "没有允许的自动恢复动作，升级人工")
         store.add_timeline_event(
             incident.id,
             "incident.escalated",
             "policy_gate",
-            {"reason": "R2 操作在 MVP 中禁用", "runbook_ref": runbook_ref},
+            {"reason": "没有允许的自动恢复动作", "runbook_ref": None},
         )
     elif runbook_ref == "no_op":
         store.set_status(incident, IncidentStatus.VERIFYING, "观察自动恢复")
@@ -1196,22 +1157,33 @@ async def run_scenario(
         store.set_status(incident, IncidentStatus.RESOLVED, "自动恢复验证通过")
         incident.resolved_at = datetime.now()
     else:
-        parameters = {"reason": f"修复 {scenario_id} 的演练故障"}
-        if runbook_ref == "scale_deployment@1":
-            parameters["replicas"] = 4
-        store.set_status(incident, IncidentStatus.AWAITING_APPROVAL, "等待人工批准 R1 动作")
-        store.create_approval(
-            incident.id,
-            ApprovalRequest(
-                plan_id=f"plan-{incident.id[:8]}",
-                runbook_ref=runbook_ref,
-                target=target,
-                parameters=parameters,
-                risk_level=RiskLevel.R1,
-                plan_hash=compute_plan_hash(runbook_ref, target, parameters, incident.id),
-                hypothesis_id=f"hyp-{incident.id[:8]}",
-            ),
-        )
+        store.set_status(incident, IncidentStatus.PLAN_PROPOSED, "形成受限恢复方案")
+        decision = check_mvp_policy(runbook_ref, target)
+        if not decision.allowed:
+            store.set_status(incident, IncidentStatus.ESCALATED, decision.reason)
+            store.add_timeline_event(
+                incident.id,
+                "incident.escalated",
+                "policy_gate",
+                {"reason": decision.reason, "runbook_ref": runbook_ref},
+            )
+        else:
+            parameters = {"reason": f"修复 {scenario_id} 的演练故障"}
+            if runbook_ref == "scale_deployment@1":
+                parameters["replicas"] = 3
+            store.set_status(incident, IncidentStatus.AWAITING_APPROVAL, "等待人工批准 R1 动作")
+            store.create_approval(
+                incident.id,
+                ApprovalRequest(
+                    plan_id=f"plan-{incident.id[:8]}",
+                    runbook_ref=runbook_ref,
+                    target=target,
+                    parameters=parameters,
+                    risk_level=decision.risk_level,
+                    plan_hash=compute_plan_hash(runbook_ref, target, parameters, incident.id),
+                    hypothesis_id=f"hyp-{incident.id[:8]}",
+                ),
+            )
 
     return {
         "exercise_id": str(uuid4()),

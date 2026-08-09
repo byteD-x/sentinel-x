@@ -20,22 +20,10 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-
-class IncidentStatus(str, Enum):
-    DETECTED = "DETECTED"
-    TRIAGING = "TRIAGING"
-    DIAGNOSING = "DIAGNOSING"
-    PLAN_PROPOSED = "PLAN_PROPOSED"
-    AWAITING_APPROVAL = "AWAITING_APPROVAL"
-    EXECUTING = "EXECUTING"
-    VERIFYING = "VERIFYING"
-    RESOLVED = "RESOLVED"
-    ESCALATED = "ESCALATED"
-    FAILED = "FAILED"
+from sentinel_x_contracts import IncidentStatus
 
 
 # 合法状态转换表 — 唯一事实来源

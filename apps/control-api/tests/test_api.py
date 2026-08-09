@@ -6,7 +6,9 @@ import json
 import time
 
 import pytest
+from demo.scenarios.loader import ScenarioLoader
 from httpx import ASGITransport, AsyncClient
+from sentinel_x_contracts import IncidentSeverity, IncidentStatus, RiskLevel
 from sentinel_x_domain.services import compute_plan_hash
 
 import sentinel_x_control_api.app as control_module
@@ -442,7 +444,7 @@ class TestIncidents:
 
     async def test_viewer_cannot_decide_pending_approval(self, client):
         started = await client.post(
-            "/api/scenarios/order-db-errors@1/run",
+            "/api/scenarios/inventory-latched-5xx@1/run",
             headers={"X-Sentinel-Role": "scenario_operator"},
         )
 
@@ -609,7 +611,7 @@ class TestApprovals:
         assert "R2" in response.json()["detail"]
 
     async def test_global_approval_queue_returns_incident_context(self, client):
-        response = await client.post("/api/scenarios/payment-latency@1/run", headers={"X-Sentinel-Role": "scenario_operator"})
+        response = await client.post("/api/scenarios/inventory-latched-5xx@1/run", headers={"X-Sentinel-Role": "scenario_operator"})
         assert response.status_code == 202
 
         queue_response = await client.get("/api/approvals")
@@ -627,18 +629,71 @@ class TestApprovals:
 
 @pytest.mark.asyncio
 class TestScenarios:
-    async def test_list_scenarios(self, client):
+    async def test_control_api_reuses_shared_incident_enums(self):
+        assert control_module.IncidentStatus is IncidentStatus
+        assert control_module.RiskLevel is RiskLevel
+        assert control_module.IncidentSeverity is IncidentSeverity
+
+    async def test_list_scenarios_projects_yaml_source_without_ground_truth(self, client):
         response = await client.get("/api/scenarios")
         assert response.status_code == 200
-        data = response.json()
-        assert len(data["items"]) == 6  # 6 个预置场景
+        items = response.json()["items"]
+        definitions = ScenarioLoader(control_module.SCENARIOS_DIR).load_all()
+
+        assert {item["id"] for item in items} == {definition.id for definition in definitions}
+        payment_capacity = next(item for item in items if item["id"] == "payment-capacity-latency@1")
+        payment_capacity_definition = next(
+            definition for definition in definitions if definition.id == "payment-capacity-latency@1"
+        )
+        assert payment_capacity["description"] == payment_capacity_definition.description
+        assert payment_capacity["target_service"] == "payment-api"
+        assert payment_capacity["target_namespace"] == "demo-shop"
+        assert "ground_truth" not in payment_capacity
+        assert payment_capacity_definition.ground_truth not in response.text
 
     async def test_run_scenario_requires_operator_role(self, client):
         response = await client.post("/api/scenarios/payment-pod-crash@1/run")
         assert response.status_code == 403
 
+    async def test_run_scenario_uses_yaml_fault_target_without_leaking_ground_truth(self, client):
+        definition = ScenarioLoader(control_module.SCENARIOS_DIR).get("payment-capacity-latency@1")
+        assert definition is not None
+
+        response = await client.post(
+            "/api/scenarios/payment-capacity-latency@1/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+
+        assert response.status_code == 202
+        incident_id = response.json()["incident_id"]
+        timeline = (await client.get(f"/api/incidents/{incident_id}/timeline")).json()["events"]
+        scenario_started = next(
+            event for event in timeline if event["event_type"] == "scenario.started"
+        )
+        assert scenario_started["payload"]["target"] == "payment-api"
+        assert scenario_started["payload"]["target_namespace"] == "demo-shop"
+
+        approvals = (await client.get(f"/api/incidents/{incident_id}/approvals")).json()["items"]
+        assert approvals[0]["target"] == "payment-api"
+        public_payload = "".join([
+            response.text,
+            json.dumps(timeline, ensure_ascii=False),
+            (await client.get(f"/api/incidents/{incident_id}")).text,
+            (await client.get(f"/api/incidents/{incident_id}/approvals")).text,
+        ])
+        assert definition.ground_truth not in public_payload
+
+    async def test_run_unknown_scenario_returns_not_found(self, client):
+        response = await client.post(
+            "/api/scenarios/unknown-scenario@1/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+
+        assert response.status_code == 404
+        assert "ground_truth" not in response.text
+
     async def test_run_scenario_creates_incident_and_approval(self, client):
-        response = await client.post("/api/scenarios/order-db-errors@1/run", headers={"X-Sentinel-Role": "scenario_operator"})
+        response = await client.post("/api/scenarios/inventory-latched-5xx@1/run", headers={"X-Sentinel-Role": "scenario_operator"})
         assert response.status_code == 202
         data = response.json()
         assert data["status"] == "AWAITING_APPROVAL"
@@ -678,7 +733,7 @@ class TestScenarios:
 
     async def test_incident_overview_exposes_pending_decision_context(self, client):
         started = await client.post(
-            "/api/scenarios/order-db-errors@1/run",
+            "/api/scenarios/inventory-latched-5xx@1/run",
             headers={"X-Sentinel-Role": "scenario_operator"},
         )
         incident_id = started.json()["incident_id"]
@@ -729,9 +784,18 @@ class TestScenarios:
             "source_mode": "fixture",
         }
 
+        timeline = (await client.get(f"/api/incidents/{incident_id}/timeline")).json()["events"]
+        transitions = [
+            event["payload"]["to"]
+            for event in timeline
+            if event["event_type"] == "incident.status_changed"
+        ]
+        assert transitions == ["TRIAGING", "DIAGNOSING", "VERIFYING", "RESOLVED"]
+        assert "PLAN_PROPOSED" not in transitions
+
     async def test_escalated_overview_marks_last_real_phase_failed(self, client):
         started = await client.post(
-            "/api/scenarios/order-bad-deployment@1/run",
+            "/api/scenarios/payment-bad-deployment@1/run",
             headers={"X-Sentinel-Role": "scenario_operator"},
         )
         incident_id = started.json()["incident_id"]
@@ -744,6 +808,44 @@ class TestScenarios:
         assert overview["next_decision"]["kind"] == "escalated"
         assert overview["milestones"][-1]["phase"] == "plan"
         assert overview["milestones"][-1]["state"] == "failed"
+
+    @pytest.mark.parametrize(
+        ("scenario_id", "expected_status", "expects_plan", "expected_reason"),
+        [
+            ("payment-pod-crash@1", "RESOLVED", False, None),
+            ("payment-capacity-latency@1", "AWAITING_APPROVAL", True, None),
+            ("inventory-latched-5xx@1", "AWAITING_APPROVAL", True, None),
+            ("inventory-redis-timeout@1", "ESCALATED", False, "没有允许的自动恢复动作"),
+            ("order-database-lock@1", "ESCALATED", False, "没有允许的自动恢复动作"),
+            ("payment-bad-deployment@1", "ESCALATED", True, "R2"),
+        ],
+    )
+    async def test_six_catalog_scenarios_follow_explicit_local_policy_branches(
+        self,
+        client,
+        scenario_id,
+        expected_status,
+        expects_plan,
+        expected_reason,
+    ):
+        started = await client.post(
+            f"/api/scenarios/{scenario_id}/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+
+        assert started.status_code == 202
+        assert started.json()["status"] == expected_status
+        incident_id = started.json()["incident_id"]
+        timeline = (await client.get(f"/api/incidents/{incident_id}/timeline")).json()["events"]
+        transitions = [
+            event["payload"]["to"]
+            for event in timeline
+            if event["event_type"] == "incident.status_changed"
+        ]
+
+        assert ("PLAN_PROPOSED" in transitions) is expects_plan
+        if expected_reason is not None:
+            assert expected_reason in str(timeline)
 
 
 @pytest.mark.asyncio

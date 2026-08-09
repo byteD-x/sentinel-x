@@ -1,0 +1,23 @@
+name: "inventory-latched-5xx@1"
+version: 1
+description: "inventory-api 进程内的锁存错误状态导致持续 5xx。"
+category: application
+faults:
+  - fault_type: error_5xx
+    target_service: inventory-api
+    target_namespace: demo-shop
+    parameters:
+      error_rate: 1.0
+      latched: true
+    duration_seconds: 300
+    cleanup_command: "POST /fault/clear"
+ground_truth: "LATCHED_RUNTIME_FAILURE + inventory-api"
+expected_root_cause_category: LATCHED_RUNTIME_FAILURE
+expected_evidence:
+  - "inventory-api 持续 5xx"
+  - "order-api 调用 inventory-api 的 Trace 标记为 error"
+recovery_assertions:
+  - "inventory-api 5xx 错误率 < 1%"
+  - "order-api 成功率在完整观测窗口内恢复"
+allowlisted_runbooks:
+  - "restart_deployment@1"

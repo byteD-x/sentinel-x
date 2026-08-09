@@ -1,0 +1,22 @@
+name: "order-database-lock@1"
+version: 1
+description: "专用注入事务持有 order-db 锁，系统必须诊断后升级人工，不能执行数据库写操作。"
+category: database
+faults:
+  - fault_type: database_lock
+    target_service: order-db
+    target_namespace: demo-shop
+    parameters:
+      lock_scope: exercise_only
+      max_duration_seconds: 300
+    duration_seconds: 300
+    cleanup_command: "scenario_runner:release_owned_lock"
+ground_truth: "DATABASE_LOCK_CONTENTION + order-db"
+expected_root_cause_category: DATABASE_LOCK_CONTENTION
+expected_evidence:
+  - "order-db lock wait 与事务延迟上升"
+  - "order-api 请求堆积且其他依赖正常"
+recovery_assertions:
+  - "系统记录正确人工升级"
+  - "清理专用事务后订单 SLI 恢复"
+allowlisted_runbooks: []

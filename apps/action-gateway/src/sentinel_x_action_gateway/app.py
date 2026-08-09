@@ -26,27 +26,15 @@ import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
+from sentinel_x_contracts import RiskLevel
 from sentinel_x_domain.services import compute_plan_hash
 
 logger = logging.getLogger("sentinel_x_action_gateway")
-
-
-# ---------------------------------------------------------------------------
-# 风险等级
-# ---------------------------------------------------------------------------
-
-
-class RiskLevel(str, Enum):
-    R0 = "R0"
-    R1 = "R1"
-    R2 = "R2"
-    R3 = "R3"
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,22 @@
+name: "payment-bad-deployment@1"
+version: 1
+description: "payment-api 已登记坏版本造成持续错误，回滚属于 MVP 禁用的 R2 动作。"
+category: application
+faults:
+  - fault_type: bad_deployment
+    target_service: payment-api
+    target_namespace: demo-shop
+    parameters:
+      registered_bad_version: "exercise-bad-v1"
+    duration_seconds: 300
+    cleanup_command: "scenario_runner:restore_recorded_before_version"
+ground_truth: "BAD_DEPLOYMENT + payment-api"
+expected_root_cause_category: BAD_DEPLOYMENT
+expected_evidence:
+  - "部署变更时间与 payment-api 错误率对齐"
+  - "坏版本实例与 trace 属性一致"
+recovery_assertions:
+  - "系统拒绝 R2 回滚并升级人工"
+  - "cleanup 恢复登记的 before version"
+allowlisted_runbooks:
+  - "rollback_deployment@1"

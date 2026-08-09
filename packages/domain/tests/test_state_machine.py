@@ -5,6 +5,7 @@
 import pytest
 from uuid import uuid4
 
+from sentinel_x_contracts import IncidentStatus as ContractIncidentStatus
 from sentinel_x_domain.state_machine import (
     IncidentStatus,
     IncidentState,
@@ -186,3 +187,8 @@ class TestAllTransitionsCovered:
         for status in IncidentStatus:
             if status not in TERMINAL_STATUSES:
                 assert len(VALID_TRANSITIONS[status]) > 0, f"{status} 缺少出边"
+
+
+class TestContractReuse:
+    def test_status_is_the_shared_contract_enum(self):
+        assert IncidentStatus is ContractIncidentStatus

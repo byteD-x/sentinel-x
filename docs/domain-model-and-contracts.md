@@ -57,6 +57,12 @@ DETECTED
 | `TimelineEvent` | `id`, `incident_id`, `actor_type`, `event_type`, `payload_ref`, `occurred_at` |
 | `EvalResult` | `run_id`, `dataset_version`, `root_cause_match`, `timings`, `recovery`, `safety`, `cost` |
 
+### 当前 light 场景契约
+
+`ScenarioDefinition` 与嵌套 `FaultInjection` 在当前实现中为冻结、拒绝未知字段的 Pydantic 模型。场景引用固定为 `name@version`，`id` 必须与名称一致，版本不一致会拒绝加载；`RootCauseCategory` 只接受场景目录列出的六类规范值。`cleanup_command` 只是由隔离 Scenario Runner 消费的非可信元数据，Control API、Worker 与模型均不会执行它。
+
+该契约不替代 full profile 的 ExerciseRun 持久化、目标 UID 校验或真实注入/cleanup 生命周期。
+
 ### Evidence 类型
 
 - `METRIC`: PromQL 查询、范围和结果引用。

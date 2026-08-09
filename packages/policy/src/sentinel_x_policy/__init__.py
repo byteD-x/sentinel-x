@@ -12,15 +12,10 @@ Policy Engine — 风险分级与确定性策略校验。
 """
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Optional
 
+from sentinel_x_contracts import RiskLevel
 
-class RiskLevel(str, Enum):
-    R0 = "R0"  # 只读，无副作用，可自动执行
-    R1 = "R1"  # 单服务可逆动作，需审批
-    R2 = "R2"  # 数据库/跨服务动作，MVP 禁用
-    R3 = "R3"  # 任意 Shell/exec/Secrets，永久禁止
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +26,7 @@ RUNBOOK_RISK_MAP: dict[str, RiskLevel] = {
     "restart_deployment@1": RiskLevel.R1,
     "scale_deployment@1": RiskLevel.R1,
     "db_rollback@1": RiskLevel.R2,
+    "rollback_deployment@1": RiskLevel.R2,
     "db_migration@1": RiskLevel.R2,
     "cross_service_restart@1": RiskLevel.R2,
     "exec_pod_command@1": RiskLevel.R3,

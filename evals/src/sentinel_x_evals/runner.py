@@ -79,7 +79,7 @@ class EvalRunner:
 
     用法：
         runner = EvalRunner(config, executor=scenario_executor)
-        report = await runner.run_scenarios(["payment-latency@1", "order-db-errors@1"])
+        report = await runner.run_scenarios(["inventory-latched-5xx@1", "payment-capacity-latency@1"])
         print(report.to_markdown())
     """
 

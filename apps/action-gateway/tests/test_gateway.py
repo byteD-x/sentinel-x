@@ -9,7 +9,15 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from sentinel_x_action_gateway.app import app, store, gate
+from sentinel_x_contracts import RiskLevel as ContractRiskLevel
+from sentinel_x_action_gateway.app import (
+    REGISTERED_RUNBOOKS,
+    RiskLevel,
+    RunbookDefinition,
+    app,
+    gate,
+    store,
+)
 from sentinel_x_domain.services import compute_plan_hash
 
 
@@ -100,13 +108,33 @@ class TestRejections:
         assert resp.status_code == 400
         assert "未知 Runbook" in resp.json()["detail"]
 
-    async def test_r2_runbook_rejected(self, client):
-        """R2 操作被拒绝（尽管未在 MVP 登记，仍应被拒绝）。"""
-        # 未登记的 runbook 被当作未知处理
+    async def test_r2_runbook_rejected(self, client, monkeypatch):
+        """已登记的 R2 操作也必须在 MVP 中被拒绝。"""
+        monkeypatch.setitem(REGISTERED_RUNBOOKS, "db_rollback@1", RunbookDefinition(
+            ref="db_rollback@1",
+            description="test-only R2 runbook",
+            risk_level=RiskLevel.R2,
+            target_selector=r"^inventory-api$",
+        ))
         resp = await client.post("/api/actions", json=_make_request(
             runbook_ref="db_rollback@1"
         ))
         assert resp.status_code == 400
+        assert "R2" in resp.json()["detail"]
+
+    async def test_r3_runbook_is_permanently_rejected(self, client, monkeypatch):
+        """已登记的 R3 操作必须永久拒绝。"""
+        monkeypatch.setitem(REGISTERED_RUNBOOKS, "exec_pod_command@1", RunbookDefinition(
+            ref="exec_pod_command@1",
+            description="test-only R3 runbook",
+            risk_level=RiskLevel.R3,
+            target_selector=r"^inventory-api$",
+        ))
+        resp = await client.post("/api/actions", json=_make_request(
+            runbook_ref="exec_pod_command@1"
+        ))
+        assert resp.status_code == 400
+        assert "R3" in resp.json()["detail"]
 
     async def test_invalid_target_rejected(self, client):
         resp = await client.post("/api/actions", json=_make_request(
@@ -243,3 +271,7 @@ class TestHealth:
         resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["actions_enabled"] is False
+
+
+def test_gateway_risk_level_is_the_shared_contract_enum():
+    assert RiskLevel is ContractRiskLevel

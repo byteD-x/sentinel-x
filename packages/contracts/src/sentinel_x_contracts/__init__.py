@@ -56,6 +56,7 @@ from sentinel_x_contracts.timeline import (
 )
 from sentinel_x_contracts.scenario import (
     FaultCategory,
+    RootCauseCategory,
     FaultInjection,
     ScenarioDefinition,
     ExerciseRun,
@@ -108,6 +109,7 @@ __all__ = [
     "TimelineEvent",
     # Scenario
     "FaultCategory",
+    "RootCauseCategory",
     "FaultInjection",
     "ScenarioDefinition",
     "ExerciseRun",

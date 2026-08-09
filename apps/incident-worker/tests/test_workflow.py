@@ -7,11 +7,14 @@ from uuid import uuid4
 
 from sentinel_x_domain.services import compute_plan_hash
 from sentinel_x_domain.state_machine import IncidentState, IncidentStatus
+from sentinel_x_contracts import RiskLevel as ContractRiskLevel
 from sentinel_x_incident_worker.workflows import (
     HypothesisResult,
     IncidentWorkflow,
+    PlanResult,
     WorkflowContext,
 )
+from sentinel_x_policy import RiskLevel
 
 
 @pytest.fixture
@@ -143,6 +146,78 @@ class TestPlanGeneration:
         await wf.execute()
         if fresh_ctx.plan:
             assert fresh_ctx.plan.policy_reason  # 策略校验理由不能为空
+
+    async def test_policy_rejection_is_proposed_before_escalation(self, fresh_ctx, monkeypatch):
+        """策略拒绝的动作计划必须先进入 PLAN_PROPOSED。"""
+        wf = IncidentWorkflow(fresh_ctx)
+        wf.sm.transition(IncidentStatus.TRIAGING)
+        wf.sm.transition(IncidentStatus.DIAGNOSING)
+        fresh_ctx.hypothesis_history.append(
+            HypothesisResult(
+                hypothesis_id="hypothesis-policy-rejected",
+                statement="requires a prohibited action",
+                confidence=0.9,
+                root_cause_category="database",
+                affected_service="inventory-api",
+                supporting_evidence_ids=["evidence-001"],
+                opposing_evidence_ids=[],
+                suggested_next_steps=[],
+                needs_human_escalation=False,
+            )
+        )
+
+        async def rejected_plan(_: HypothesisResult) -> PlanResult:
+            return PlanResult(
+                plan_id="plan-policy-rejected",
+                runbook_ref="db_rollback@1",
+                target="inventory-api",
+                parameters={},
+                risk_level=RiskLevel.R2.value,
+                plan_hash="test-plan-hash",
+                policy_allowed=False,
+                policy_reason="R2 disabled in MVP",
+            )
+
+        monkeypatch.setattr(wf, "_generate_plan_activity", rejected_plan)
+
+        await wf._phase_plan()
+
+        assert fresh_ctx.state.status == IncidentStatus.ESCALATED
+        assert any("DIAGNOSING -> PLAN_PROPOSED" in entry for entry in fresh_ctx.state.history)
+        assert any("PLAN_PROPOSED -> ESCALATED" in entry for entry in fresh_ctx.state.history)
+
+    async def test_no_op_moves_directly_from_diagnosing_to_verifying(self, fresh_ctx, monkeypatch):
+        """自动恢复没有动作、审批或 ActionExecution。"""
+        wf = IncidentWorkflow(fresh_ctx)
+
+        async def kubernetes_auto_recovery() -> HypothesisResult:
+            return HypothesisResult(
+                hypothesis_id="hypothesis-auto-recovery",
+                statement="workload has already recovered",
+                confidence=0.9,
+                root_cause_category="kubernetes",
+                affected_service="payment-api",
+                supporting_evidence_ids=["evidence-001"],
+                opposing_evidence_ids=[],
+                suggested_next_steps=[],
+                needs_human_escalation=False,
+            )
+
+        monkeypatch.setattr(wf, "_generate_hypothesis_activity", kubernetes_auto_recovery)
+
+        result = await wf.execute()
+
+        assert result.status == IncidentStatus.RESOLVED
+        assert fresh_ctx.plan is not None
+        assert fresh_ctx.plan.runbook_ref == "no_op"
+        assert fresh_ctx.approval is None
+        assert fresh_ctx.actions == []
+        assert any("DIAGNOSING -> VERIFYING" in entry for entry in result.history)
+        assert all("PLAN_PROPOSED" not in entry for entry in result.history)
+
+
+def test_policy_risk_level_is_the_shared_contract_enum():
+    assert RiskLevel is ContractRiskLevel
 
 
 @pytest.mark.asyncio

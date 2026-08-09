@@ -19,15 +19,13 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
+from sentinel_x_contracts import IncidentStatus, RiskLevel
 from sentinel_x_domain.state_machine import (
     IncidentState,
     IncidentStateMachine,
-    IncidentStatus,
-    TERMINAL_STATUSES,
 )
 from sentinel_x_domain.services import compute_plan_hash
 from sentinel_x_policy import (
-    RiskLevel,
     check_mvp_policy,
     classify_runbook_risk,
 )
@@ -272,12 +270,20 @@ class IncidentWorkflow:
         # 选择置信度最高的假设
         best = max(self.ctx.hypothesis_history, key=lambda h: h.confidence)
 
-        self.sm.transition(IncidentStatus.PLAN_PROPOSED, reason="生成恢复方案")
-
         # Activity: 生成计划
         plan = await self._generate_plan_activity(best)
         self.ctx.plan = plan
         self.ctx.llm_calls_consumed += 1
+
+        # 无动作的自动恢复不进入 PLAN_PROPOSED，不创建审批或 ActionExecution。
+        if plan.runbook_ref == "no_op":
+            self.sm.transition(
+                IncidentStatus.VERIFYING,
+                reason="自动恢复场景，无需动作",
+            )
+            return
+
+        self.sm.transition(IncidentStatus.PLAN_PROPOSED, reason="生成恢复方案")
 
         if not plan.policy_allowed:
             logger.warning(f"策略拒绝: {plan.policy_reason}")
@@ -286,13 +292,6 @@ class IncidentWorkflow:
                 reason=f"策略拒绝: {plan.policy_reason}",
             )
             return
-
-        # 检查是否为自动恢复场景（无需动作）
-        if plan.runbook_ref == "no_op":
-            self.sm.transition(
-                IncidentStatus.VERIFYING,
-                reason="自动恢复场景，跳过执行",
-            )
 
     async def _phase_approval(self) -> None:
         """审批阶段：等待人工审批。"""
@@ -363,7 +362,10 @@ class IncidentWorkflow:
 
     async def _phase_verify(self) -> None:
         """验证阶段：检查 SLO 恢复。"""
-        self.sm.transition(IncidentStatus.VERIFYING, reason="验证恢复状态")
+        if self.sm.status == IncidentStatus.EXECUTING:
+            self.sm.transition(IncidentStatus.VERIFYING, reason="验证恢复状态")
+        elif self.sm.status != IncidentStatus.VERIFYING:
+            raise RuntimeError(f"不能从 {self.sm.status.value} 进入恢复验证")
 
         # Activity: 验证恢复
         recovered = await self._verify_recovery_activity()

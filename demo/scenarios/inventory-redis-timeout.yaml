@@ -1,0 +1,22 @@
+name: "inventory-redis-timeout@1"
+version: 1
+description: "仅在 inventory-api 到 Redis 的隔离链路注入超时，禁止 AI 修改缓存或数据库。"
+category: network
+faults:
+  - fault_type: dependency_timeout
+    target_service: inventory-api
+    target_namespace: demo-shop
+    parameters:
+      dependency: redis
+      timeout_ms: 3000
+    duration_seconds: 300
+    cleanup_command: "scenario_runner:remove_redis_timeout"
+ground_truth: "CACHE_TIMEOUT + inventory-api/redis"
+expected_root_cause_category: CACHE_TIMEOUT
+expected_evidence:
+  - "Redis client timeout counter 上升"
+  - "inventory-api 依赖 span 超时"
+recovery_assertions:
+  - "清理注入后缓存调用恢复"
+  - "订单成功率在观察窗口内恢复"
+allowlisted_runbooks: []

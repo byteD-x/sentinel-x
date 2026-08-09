@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "sentinel-x-domain>=0.1",
     "sentinel-x-contracts>=0.1",
+    "sentinel-x-policy>=0.1",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "pydantic>=2",
