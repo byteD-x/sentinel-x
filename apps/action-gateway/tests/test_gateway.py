@@ -26,6 +26,7 @@ def reset_state():
     """每个测试前重置状态。"""
     store._executions.clear()
     store._idempotency_keys.clear()
+    store._consumed_approval_ids.clear()
     gate.kill_switch = False
     gate.approval_token_secret = "test-approval-secret"
     gate.admin_token = "test-admin-token"
@@ -41,6 +42,19 @@ async def client():
 
 def _make_plan_hash(runbook_ref: str, target: str, parameters: dict, incident_id: str) -> str:
     return compute_plan_hash(runbook_ref, target, parameters, incident_id)
+
+
+def _sign_approval_token(data: dict) -> str:
+    canonical = "|".join((
+        data["approval_id"],
+        data["incident_id"],
+        data["plan_hash"],
+        data["audience"],
+        datetime.fromisoformat(data["approval_expires_at"]).astimezone(timezone.utc).isoformat(),
+    ))
+    return hmac.new(
+        gate.approval_token_secret.encode(), canonical.encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def _make_request(
@@ -66,10 +80,7 @@ def _make_request(
         "incident_id": incident_id,
         "audience": "sentinel-action-gateway",
     }
-    canonical = "|".join((data["approval_id"], data["incident_id"], data["plan_hash"], data["audience"]))
-    data["approval_token"] = hmac.new(
-        gate.approval_token_secret.encode(), canonical.encode(), hashlib.sha256
-    ).hexdigest()
+    data["approval_token"] = _sign_approval_token(data)
     return data
 
 
@@ -146,10 +157,7 @@ class TestRejections:
     async def test_wrong_plan_hash_rejected(self, client):
         data = _make_request()
         data["plan_hash"] = "0000000000000000"  # 错误的 hash
-        canonical = "|".join((data["approval_id"], data["incident_id"], data["plan_hash"], data["audience"]))
-        data["approval_token"] = hmac.new(
-            gate.approval_token_secret.encode(), canonical.encode(), hashlib.sha256
-        ).hexdigest()
+        data["approval_token"] = _sign_approval_token(data)
         resp = await client.post("/api/actions", json=data)
         assert resp.status_code == 400
         assert "hash" in resp.json()["detail"].lower()
@@ -164,10 +172,7 @@ class TestRejections:
     async def test_invalid_audience_rejected(self, client):
         data = _make_request()
         data["audience"] = "other-service"
-        canonical = "|".join((data["approval_id"], data["incident_id"], data["plan_hash"], data["audience"]))
-        data["approval_token"] = hmac.new(
-            gate.approval_token_secret.encode(), canonical.encode(), hashlib.sha256
-        ).hexdigest()
+        data["approval_token"] = _sign_approval_token(data)
         resp = await client.post("/api/actions", json=data)
         assert resp.status_code == 400
         assert "audience" in resp.json()["detail"]
@@ -188,6 +193,19 @@ class TestRejections:
         assert resp2.status_code == 400
         assert "幂等键" in resp2.json()["detail"]
 
+    async def test_approval_id_is_consumed_once_across_idempotency_keys(self, client):
+        first = _make_request()
+        second = _make_request()
+        second["idempotency_key"] = "test-key-for-approval-replay"
+
+        first_response = await client.post("/api/actions", json=first)
+        second_response = await client.post("/api/actions", json=second)
+
+        assert first_response.status_code == 202
+        assert second_response.status_code == 400
+        assert "审批" in second_response.json()["detail"]
+        assert "消费" in second_response.json()["detail"]
+
     async def test_invalid_scale_params_rejected(self, client):
         resp = await client.post("/api/actions", json=_make_request(
             runbook_ref="scale_deployment@1",
@@ -201,9 +219,21 @@ class TestRejections:
         data["approval_expires_at"] = (
             datetime.now(timezone.utc) - timedelta(minutes=1)
         ).isoformat()
+        data["approval_token"] = _sign_approval_token(data)
         resp = await client.post("/api/actions", json=data)
         assert resp.status_code == 400
         assert "过期" in resp.json()["detail"]
+
+    async def test_approval_token_binds_expiration(self, client):
+        data = _make_request()
+        data["approval_expires_at"] = (
+            datetime.now(timezone.utc) + timedelta(days=1)
+        ).isoformat()
+
+        resp = await client.post("/api/actions", json=data)
+
+        assert resp.status_code == 400
+        assert "审批凭证" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio

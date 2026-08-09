@@ -25,7 +25,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -146,6 +146,7 @@ class HealthResponse(BaseModel):
 @dataclass
 class StoredExecution:
     execution_id: str
+    approval_id: str = ""
     status: str = "pending"
     runbook_ref: str = ""
     target: str = ""
@@ -165,6 +166,7 @@ class ExecutionStore:
     def __init__(self):
         self._executions: dict[str, StoredExecution] = {}
         self._idempotency_keys: set[str] = set()
+        self._consumed_approval_ids: set[str] = set()
         self.claim_lock = asyncio.Lock()
 
     def check_idempotency(self, key: str) -> Optional[StoredExecution]:
@@ -174,9 +176,14 @@ class ExecutionStore:
                 return exec_data
         return None
 
+    def is_approval_consumed(self, approval_id: str) -> bool:
+        """审批只能用于登记一次动作。"""
+        return approval_id in self._consumed_approval_ids
+
     def create(self, execution: StoredExecution) -> None:
         self._executions[execution.execution_id] = execution
         self._idempotency_keys.add(execution.idempotency_key)
+        self._consumed_approval_ids.add(execution.approval_id)
 
     def get(self, execution_id: str) -> Optional[StoredExecution]:
         return self._executions.get(execution_id)
@@ -226,7 +233,13 @@ class ActionGate:
     def _expected_approval_token(self, req: ActionSubmitRequest) -> str | None:
         if not self.approval_token_secret:
             return None
-        canonical = "|".join((req.approval_id, req.incident_id, req.plan_hash, req.audience))
+        canonical = "|".join((
+            req.approval_id,
+            req.incident_id,
+            req.plan_hash,
+            req.audience,
+            req.approval_expires_at.astimezone(timezone.utc).isoformat(),
+        ))
         return hmac.new(
             self.approval_token_secret.encode("utf-8"),
             canonical.encode("utf-8"),
@@ -246,6 +259,9 @@ class ActionGate:
 
         if req.audience != "sentinel-action-gateway":
             return False, "审批凭证 audience 不匹配", None
+
+        if req.approval_expires_at.tzinfo is None or req.approval_expires_at.utcoffset() is None:
+            return False, "审批过期时间必须包含时区", None
 
         expected_token = self._expected_approval_token(req)
         if not expected_token:
@@ -304,6 +320,9 @@ class ActionGate:
                 f"状态: {existing.status}"
             ), None
 
+        if self.store.is_approval_consumed(req.approval_id):
+            return False, "审批凭证已被消费", None
+
         return True, "校验通过", runbook
 
     @staticmethod
@@ -350,6 +369,7 @@ class ActionGate:
 
         execution = StoredExecution(
             execution_id=execution_id,
+            approval_id=req.approval_id,
             status="running",
             runbook_ref=req.runbook_ref,
             target=req.target,
