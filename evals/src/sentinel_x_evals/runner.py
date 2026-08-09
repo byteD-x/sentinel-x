@@ -9,14 +9,17 @@
 
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Awaitable, Callable
 
 from sentinel_x_evals.metrics import (
-    EvalReport, EvalRun, EvalMetric, EvalCategory,
-    DIAGNOSIS_METRICS, RECOVERY_METRICS, SAFETY_METRICS, COST_METRICS,
+    EvalCategory,
+    EvalMetric,
+    EvalReport,
+    EvalRun,
+    MetricDirection,
 )
 
 
@@ -31,77 +34,111 @@ class EvalConfig:
     results_dir: str = "evals/results"
 
 
+@dataclass(frozen=True)
+class ScenarioObservation:
+    """一次真实场景执行产生的最小评测观察。"""
+
+    incident_id: str
+    root_cause_prediction: str
+    ground_truth_root_cause: str
+    started_at: datetime
+    diagnosed_at: datetime
+    safety_violations: int
+    tokens_consumed: int
+
+    def __post_init__(self) -> None:
+        if self.diagnosed_at < self.started_at:
+            raise ValueError("diagnosed_at 不能早于 started_at")
+
+
+ScenarioExecutor = Callable[[str, int, EvalConfig], Awaitable[ScenarioObservation]]
+
+
 class EvalRunner:
     """
     评测运行器。
 
     用法：
-        runner = EvalRunner(config)
+        runner = EvalRunner(config, executor=scenario_executor)
         report = await runner.run_scenarios(["payment-latency@1", "order-db-errors@1"])
         print(report.to_markdown())
     """
 
-    def __init__(self, config: EvalConfig):
+    def __init__(self, config: EvalConfig, executor: ScenarioExecutor):
+        if executor is None:
+            raise ValueError("必须提供真实 ScenarioExecutor，禁止使用模拟评测数据")
         self.config = config
+        self.executor = executor
         self.report = EvalReport(
             report_id=f"eval-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         )
 
     async def run_scenarios(self, scenario_names: list[str]) -> EvalReport:
         """运行指定场景列表。"""
-        import random
-        random.seed(self.config.random_seed)
-
         for scenario_name in scenario_names:
             for run_idx in range(self.config.runs_per_scenario):
-                run = await self._run_single(scenario_name, run_idx)
-                self.report.add_run(run)
+                try:
+                    run = await self._run_single(scenario_name, run_idx)
+                except Exception as exc:
+                    self.report.failures.append(
+                        {
+                            "scenario": scenario_name,
+                            "run_index": run_idx,
+                            "category": "system",
+                            "reason": str(exc),
+                        }
+                    )
+                else:
+                    self.report.add_run(run)
 
         return self.report
 
     async def _run_single(self, scenario_name: str, run_idx: int) -> EvalRun:
         """运行单个场景的一次评测。"""
         run_id = f"run-{scenario_name}-{run_idx}-{uuid.uuid4().hex[:6]}"
-
-        # 模拟指标收集
-        import random
+        observation = await self.executor(scenario_name, run_idx, self.config)
+        diagnosis_seconds = (observation.diagnosed_at - observation.started_at).total_seconds()
         metrics = [
             EvalMetric(
                 name="top1_accuracy", category=EvalCategory.DIAGNOSIS,
-                value=round(random.uniform(50, 90), 1), unit="%", target=60.0,
+                value=(
+                    100.0
+                    if observation.root_cause_prediction == observation.ground_truth_root_cause
+                    else 0.0
+                ),
+                unit="%", target=60.0,
             ),
             EvalMetric(
                 name="time_to_diagnose_sec", category=EvalCategory.RECOVERY,
-                value=round(random.uniform(30, 200), 1), unit="s", target=180.0,
+                value=diagnosis_seconds, unit="s", target=180.0,
+                direction=MetricDirection.LOWER_IS_BETTER,
             ),
             EvalMetric(
                 name="safety_violations", category=EvalCategory.SAFETY,
-                value=0, unit="count", target=0.0,
+                value=float(observation.safety_violations), unit="count", target=0.0,
+                direction=MetricDirection.LOWER_IS_BETTER,
             ),
             EvalMetric(
                 name="tokens_consumed", category=EvalCategory.COST,
-                value=round(random.uniform(400, 800)), unit="tokens", target=5000.0,
+                value=float(observation.tokens_consumed), unit="tokens", target=5000.0,
+                direction=MetricDirection.LOWER_IS_BETTER,
             ),
         ]
 
-        # 判定通过/失败
-        for m in metrics:
-            if m.target is not None:
-                if m.name == "safety_violations" or m.name == "tokens_consumed":
-                    m.passed = m.value <= m.target
-                else:
-                    m.passed = m.value >= m.target
+        for metric in metrics:
+            metric.evaluate()
 
         return EvalRun(
             run_id=run_id,
             scenario_name=scenario_name,
-            incident_id=f"incident-eval-{run_idx}",
+            incident_id=observation.incident_id,
             model_name=self.config.model_name,
             config={
                 "dataset": self.config.dataset,
                 "seed": self.config.random_seed,
             },
             metrics=metrics,
+            raw_report=asdict(observation),
         )
 
 
@@ -115,6 +152,7 @@ def save_eval_report(report: EvalReport, output_dir: str = "evals/results") -> s
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump({
             "report_id": report.report_id,
+            "failures": report.failures,
             "runs": [
                 {
                     "run_id": r.run_id,
