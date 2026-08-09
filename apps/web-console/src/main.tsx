@@ -22,6 +22,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/scenarios" element={<ScenariosPage />} />
           <Route path="/exercises" element={<ScenariosPage />} />
           <Route path="/evaluations" element={<EvaluationsPage />} />
+          <Route path="/evaluations/:reportId" element={<EvaluationsPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>

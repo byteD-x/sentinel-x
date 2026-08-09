@@ -244,6 +244,15 @@ approver 查看 `PENDING` 请求，可按过期时间、risk 和 service 筛选�
 
 ground truth 端点仅 Evaluator 的内部身份可读，不由浏览器或 Investigator 访问。
 
+### 当前 light 评测归档只读实现
+
+当前 Control API 提供 `GET /api/evaluations` 与 `GET /api/evaluations/{report_id}`。它们只读取服务端配置的 `SENTINEL_EVAL_ARCHIVE_DIR`，不接受路径、下载、重跑或删除参数。归档使用严格的 `schema_version: "1.0"`，API 对原始 JSON 字节计算 `sha256`；`raw_report`、ground truth、原始遥测、执行异常和物理路径不会进入浏览器响应。
+
+- 冷启动或空目录返回 `available: false` 和明确原因，不伪造评测数据。
+- 损坏、未知字段、聚合总数不一致、非规范 `report_id` 与符号链接均作为无效归档处理；列表保留其 ID 和稳定错误码，详情不回传文件内容。
+- 单份归档超过 `SENTINEL_EVAL_ARCHIVE_MAX_BYTES` 时详情返回 `413 EVALUATION_ARCHIVE_TOO_LARGE`；归档目录不可读时返回 `503 EVALUATION_ARCHIVE_UNAVAILABLE`。
+- 该实现是 light 本地证据读取能力，不代表 holdout benchmark、baseline 对比或 full `/api/v1` 契约已经完成。
+
 ## 13. System API
 
 - `GET /health/live`：无依赖的进程存活。

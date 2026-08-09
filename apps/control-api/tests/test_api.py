@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import json
 import time
 
 import pytest
@@ -9,8 +10,71 @@ from httpx import ASGITransport, AsyncClient
 from sentinel_x_domain.services import compute_plan_hash
 
 import sentinel_x_control_api.app as control_module
+import sentinel_x_control_api.eval_archive as eval_archive_module
 
 app = control_module.app
+
+
+def write_evaluation_archive(directory, report_id="eval-20260809-101500-a1b2c3"):
+    archive = {
+        "schema_version": "1.0",
+        "report_id": report_id,
+        "created_at": "2026-08-09T10:15:00Z",
+        "metadata": {
+            "commit_sha": "a" * 40,
+            "profile": "light",
+            "environment_ref": "local-isolated",
+            "hardware_ref": None,
+            "dataset_ref": "holdout@1",
+            "model_ref": "investigator-v1",
+            "policy_ref": "policy@1",
+            "prompt_ref": "investigator@1",
+            "random_seed": 42,
+            "runs_per_scenario": 1,
+            "timeout_seconds": 600,
+        },
+        "comparability": {
+            "comparable": False,
+            "baseline_ref": None,
+            "reasons": ["尚未建立同口径 baseline。"],
+        },
+        "aggregate": {
+            "attempted_runs": 1,
+            "completed_runs": 1,
+            "failed_runs": 0,
+            "metrics": [{
+                "name": "top1_accuracy",
+                "category": "diagnosis",
+                "value": 100.0,
+                "unit": "%",
+                "target": 60.0,
+                "direction": "higher_is_better",
+                "passed": True,
+                "sample_count": 1,
+            }],
+        },
+        "runs": [{
+            "run_id": "run-001",
+            "scenario_ref": "inventory-latched-5xx@1",
+            "run_index": 0,
+            "incident_id": "incident-001",
+            "model_ref": "investigator-v1",
+            "config": {"dataset": "holdout@1", "seed": 42},
+            "metrics": [{
+                "name": "top1_accuracy",
+                "category": "diagnosis",
+                "value": 100.0,
+                "unit": "%",
+                "target": 60.0,
+                "direction": "higher_is_better",
+                "passed": True,
+            }],
+        }],
+        "failures": [],
+    }
+    path = directory / f"{report_id}.json"
+    path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
+    return path, archive
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +118,184 @@ class TestHealthCheck:
         assert data["status"] == "ok"
         assert data["version"] == "0.1.0"
         assert data["actions_enabled"] is False
+
+
+@pytest.mark.asyncio
+class TestEvaluations:
+    async def test_empty_evaluation_archive_returns_unavailable_reason(self, client, monkeypatch, tmp_path):
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "available": False,
+            "unavailable_reason": "尚无已归档的评测报告",
+            "items": [],
+        }
+
+    async def test_evaluation_list_exposes_valid_archive_summary_and_raw_hash(self, client, monkeypatch, tmp_path):
+        path, _ = write_evaluation_archive(tmp_path)
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["available"] is True
+        item = data["items"][0]
+        assert item["archive_status"] == "valid"
+        assert item["report_id"] == "eval-20260809-101500-a1b2c3"
+        assert item["metadata"]["dataset_ref"] == "holdout@1"
+        assert item["aggregate"]["completed_runs"] == 1
+        assert item["artifact"]["sha256"] == f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+
+    async def test_evaluation_detail_returns_validated_archive_and_raw_hash(self, client, monkeypatch, tmp_path):
+        path, archive = write_evaluation_archive(tmp_path)
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations/eval-20260809-101500-a1b2c3")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["report"] == archive
+        assert data["artifact"]["sha256"] == f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+
+    async def test_invalid_evaluation_archive_is_listed_without_leaking_its_contents(self, client, monkeypatch, tmp_path):
+        (tmp_path / "eval-invalid.json").write_text('{"schema_version":', encoding="utf-8")
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        list_response = await client.get("/api/evaluations")
+        detail_response = await client.get("/api/evaluations/eval-invalid")
+
+        assert list_response.status_code == 200
+        assert list_response.json()["items"] == [{
+            "report_id": "eval-invalid",
+            "archive_status": "invalid",
+            "error": {
+                "code": "EVALUATION_ARCHIVE_INVALID",
+                "message": "评测归档无效",
+            },
+        }]
+        assert detail_response.status_code == 422
+        assert detail_response.json() == {
+            "detail": "评测归档无效",
+            "code": "EVALUATION_ARCHIVE_INVALID",
+        }
+
+    async def test_evaluation_detail_rejects_symbolic_link_archives(self, client, monkeypatch, tmp_path):
+        external_path = tmp_path.parent / f"{tmp_path.name}-outside.json"
+        external_path.write_text("{}", encoding="utf-8")
+        original_resolve = eval_archive_module.Path.resolve
+        original_is_symlink = eval_archive_module.Path.is_symlink
+
+        def resolve(path, *args, **kwargs):
+            if path.name == "eval-linked.json":
+                return external_path
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(eval_archive_module.Path, "resolve", resolve)
+        monkeypatch.setattr(
+            eval_archive_module.Path,
+            "is_symlink",
+            lambda path: path.name == "eval-linked.json" or original_is_symlink(path),
+        )
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations/eval-linked")
+
+        assert response.status_code == 422
+        assert response.json() == {
+            "detail": "评测归档无效",
+            "code": "EVALUATION_ARCHIVE_INVALID",
+        }
+
+    async def test_evaluation_detail_rejects_an_invalid_report_identifier(self, client, monkeypatch, tmp_path):
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations/invalid.report")
+
+        assert response.status_code == 422
+        assert response.json() == {
+            "detail": "评测报告标识无效",
+            "code": "INVALID_EVALUATION_ID",
+        }
+
+    async def test_evaluation_detail_refuses_archives_over_the_read_limit(self, client, monkeypatch, tmp_path):
+        write_evaluation_archive(tmp_path)
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_MAX_BYTES", 1, raising=False)
+
+        response = await client.get("/api/evaluations/eval-20260809-101500-a1b2c3")
+
+        assert response.status_code == 413
+        assert response.json() == {
+            "detail": "评测归档超过读取上限",
+            "code": "EVALUATION_ARCHIVE_TOO_LARGE",
+        }
+
+    async def test_evaluation_detail_rejects_inconsistent_run_totals(self, client, monkeypatch, tmp_path):
+        path, archive = write_evaluation_archive(tmp_path, "eval-inconsistent")
+        archive["aggregate"]["attempted_runs"] = 2
+        path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations/eval-inconsistent")
+
+        assert response.status_code == 422
+        assert response.json() == {
+            "detail": "评测归档无效",
+            "code": "EVALUATION_ARCHIVE_INVALID",
+        }
+
+    async def test_evaluation_list_marks_non_routable_report_ids_as_invalid(self, client, monkeypatch, tmp_path):
+        write_evaluation_archive(tmp_path, "eval.invalid")
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations")
+
+        assert response.status_code == 200
+        assert response.json()["items"] == [{
+            "report_id": "eval.invalid",
+            "archive_status": "invalid",
+            "error": {
+                "code": "EVALUATION_ARCHIVE_INVALID",
+                "message": "评测归档无效",
+            },
+        }]
+
+    async def test_evaluation_list_reports_an_unreadable_archive_directory(self, client, monkeypatch, tmp_path):
+        original_iterdir = eval_archive_module.Path.iterdir
+
+        def iterdir(path):
+            if path == tmp_path.resolve():
+                raise OSError("permission denied")
+            return original_iterdir(path)
+
+        monkeypatch.setattr(eval_archive_module.Path, "iterdir", iterdir)
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations")
+
+        assert response.status_code == 503
+        assert response.json() == {
+            "detail": "评测归档目录不可用",
+            "code": "EVALUATION_ARCHIVE_UNAVAILABLE",
+        }
+
+    async def test_evaluation_detail_rejects_a_report_without_a_utc_timestamp(self, client, monkeypatch, tmp_path):
+        path, archive = write_evaluation_archive(tmp_path, "eval-naive-time")
+        archive["created_at"] = "2026-08-09T10:15:00"
+        path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setattr(control_module, "EVAL_ARCHIVE_DIR", tmp_path, raising=False)
+
+        response = await client.get("/api/evaluations/eval-naive-time")
+
+        assert response.status_code == 422
+        assert response.json() == {
+            "detail": "评测归档无效",
+            "code": "EVALUATION_ARCHIVE_INVALID",
+        }
 
 
 @pytest.mark.asyncio

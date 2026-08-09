@@ -25,6 +25,7 @@ import random
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -45,6 +46,23 @@ from sentinel_x_contracts import (
     VerificationSummary,
 )
 from sentinel_x_domain.services import compute_plan_hash
+from sentinel_x_control_api.eval_archive import (
+    EvaluationArchiveError,
+    get_evaluation_archive,
+    list_evaluation_archives,
+)
+
+
+EVAL_ARCHIVE_DIR = Path(os.getenv("SENTINEL_EVAL_ARCHIVE_DIR", "evals/results"))
+EVAL_ARCHIVE_MAX_BYTES = int(os.getenv("SENTINEL_EVAL_ARCHIVE_MAX_BYTES", "2097152"))
+
+
+def _evaluation_archive_error_response(error: EvaluationArchiveError) -> JSONResponse:
+    return JSONResponse(
+        status_code=error.status_code,
+        content={"detail": error.detail, "code": error.code},
+    )
+
 
 # ---------------------------------------------------------------------------
 # 精简内联模型 — 避免依赖 contracts 包的导入问题
@@ -819,6 +837,24 @@ def _next_decision(incident: StoredIncident, approval: Optional[dict]) -> NextDe
 async def health_check():
     """健康检查。"""
     return HealthResponse()
+
+
+@app.get("/api/evaluations")
+async def list_evaluations():
+    """列出已归档的本地评测报告，冷启动时不伪造数据。"""
+    try:
+        return list_evaluation_archives(EVAL_ARCHIVE_DIR, EVAL_ARCHIVE_MAX_BYTES)
+    except EvaluationArchiveError as exc:
+        return _evaluation_archive_error_response(exc)
+
+
+@app.get("/api/evaluations/{report_id}")
+async def get_evaluation(report_id: str):
+    """读取单份已校验的本地评测归档。"""
+    try:
+        return get_evaluation_archive(EVAL_ARCHIVE_DIR, report_id, EVAL_ARCHIVE_MAX_BYTES)
+    except EvaluationArchiveError as exc:
+        return _evaluation_archive_error_response(exc)
 
 
 # ---- 事故 ----

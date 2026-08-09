@@ -62,6 +62,7 @@ class EvalRun:
     """一次评测运行的结果。"""
     run_id: str
     scenario_name: str
+    run_index: int
     incident_id: str
     model_name: str
     config: dict = field(default_factory=dict)
@@ -84,6 +85,7 @@ class EvalRun:
         return {
             "run_id": self.run_id,
             "scenario": self.scenario_name,
+            "run_index": self.run_index,
             "model": self.model_name,
             "metrics_by_category": by_category,
         }

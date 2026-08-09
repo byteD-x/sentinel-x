@@ -1,7 +1,9 @@
 """确定性评测运行器测试。"""
 
 import json
+import hashlib
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -96,7 +98,7 @@ def test_runner_requires_explicit_executor():
 
 
 @pytest.mark.asyncio
-async def test_saved_report_preserves_executor_failure(tmp_path):
+async def test_saved_report_preserves_executor_failure_as_a_sanitized_archive_record(tmp_path):
     async def execute_scenario(_scenario_name, _run_index, _config):
         raise RuntimeError("scenario injection failed")
 
@@ -108,7 +110,16 @@ async def test_saved_report_preserves_executor_failure(tmp_path):
 
     save_eval_report(report, str(tmp_path))
     raw_report = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
-    assert raw_report["failures"] == report.failures
+    assert raw_report["aggregate"]["attempted_runs"] == 1
+    assert raw_report["aggregate"]["failed_runs"] == 1
+    assert raw_report["failures"] == [{
+        "scenario_ref": "inventory-latched-5xx@1",
+        "run_index": 0,
+        "category": "system",
+        "code": "SCENARIO_EXECUTION_FAILED",
+        "message": "场景执行失败；详见受限执行日志。",
+    }]
+    assert "scenario injection failed" not in json.dumps(raw_report, ensure_ascii=False)
 
 
 @pytest.mark.asyncio
@@ -138,3 +149,60 @@ async def test_same_observation_produces_same_metrics():
         for run in report.runs
     ]
     assert metric_sets[0] == metric_sets[1]
+
+
+@pytest.mark.asyncio
+async def test_saved_report_writes_versioned_public_archive_with_aggregate_and_hash(tmp_path):
+    started_at = datetime(2026, 8, 9, 10, 0, 0)
+
+    async def execute_scenario(_scenario_name, _run_index, _config):
+        return ScenarioObservation(
+            incident_id="incident-archive-001",
+            root_cause_prediction="LATCHED_RUNTIME_FAILURE:inventory-api",
+            ground_truth_root_cause="LATCHED_RUNTIME_FAILURE:inventory-api",
+            started_at=started_at,
+            diagnosed_at=started_at + timedelta(seconds=42),
+            safety_violations=0,
+            tokens_consumed=512,
+        )
+
+    runner = EvalRunner(
+        EvalConfig(model_name="investigator-v1", runs_per_scenario=1),
+        executor=execute_scenario,
+    )
+    report = await runner.run_scenarios(["inventory-latched-5xx@1"])
+
+    markdown_path = save_eval_report(report, str(tmp_path))
+    json_path = next(tmp_path.glob("*.json"))
+    archive = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert archive["schema_version"] == "1.0"
+    assert archive["metadata"]["model_ref"] == "investigator-v1"
+    assert archive["aggregate"]["attempted_runs"] == 1
+    assert archive["aggregate"]["completed_runs"] == 1
+    assert archive["aggregate"]["failed_runs"] == 0
+    assert archive["runs"][0]["scenario_ref"] == "inventory-latched-5xx@1"
+    assert "raw_report" not in archive["runs"][0]
+    assert hashlib.sha256(json_path.read_bytes()).hexdigest() in Path(markdown_path).read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_public_report_never_exposes_executor_failure_text(tmp_path):
+    secret_like_text = "Authorization: Bearer should-not-be-published"
+
+    async def execute_scenario(_scenario_name, _run_index, _config):
+        raise RuntimeError(secret_like_text)
+
+    runner = EvalRunner(
+        EvalConfig(model_name="investigator-v1", runs_per_scenario=1),
+        executor=execute_scenario,
+    )
+    report = await runner.run_scenarios(["inventory-latched-5xx@1"])
+
+    markdown_path = save_eval_report(report, str(tmp_path), runner.config)
+    archive = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+
+    assert archive["aggregate"]["attempted_runs"] == 1
+    assert archive["aggregate"]["failed_runs"] == 1
+    assert archive["failures"][0]["message"] != secret_like_text
+    assert secret_like_text not in Path(markdown_path).read_text(encoding="utf-8")

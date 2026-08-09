@@ -7,4 +7,4 @@ name = "sentinel-x-evals"
 version = "0.1.0"
 description = "Sentinel-X 评测框架 — benchmark runner 与报告"
 requires-python = ">=3.13"
-dependencies = ["pydantic>=2"]
+dependencies = ["pydantic>=2", "sentinel-x-contracts>=0.1"]

@@ -24,6 +24,16 @@ from sentinel_x_contracts.incident import (
     IncidentListParams,
     IncidentListResponse,
 )
+from sentinel_x_contracts.evaluation import (
+    EvaluationAggregate,
+    EvaluationArchive,
+    EvaluationComparability,
+    EvaluationFailureArchive,
+    EvaluationMetadata,
+    EvaluationMetricAggregate,
+    EvaluationMetricResult,
+    EvaluationRunArchive,
+)
 from sentinel_x_contracts.evidence import (
     EvidenceSource,
     EvidenceItem,
@@ -71,6 +81,15 @@ __all__ = [
     "Incident",
     "IncidentListParams",
     "IncidentListResponse",
+    # Evaluation
+    "EvaluationAggregate",
+    "EvaluationArchive",
+    "EvaluationComparability",
+    "EvaluationFailureArchive",
+    "EvaluationMetadata",
+    "EvaluationMetricAggregate",
+    "EvaluationMetricResult",
+    "EvaluationRunArchive",
     # Evidence
     "EvidenceSource",
     "EvidenceItem",
