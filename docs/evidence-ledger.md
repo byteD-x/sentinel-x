@@ -17,8 +17,8 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`pytest -q` 与 `python -m pytest -v --tb=short --asyncio-mode=auto`，2026-08-24（Windows，本地 light）结果为 `161 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算与非法目标/篡改测试，但仍未形成固定 benchmark。
-- 前端门禁：Web Console `npm test -- --run` 为 `23 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
+- 本地门禁：`python -m pytest -q`，2026-08-24（Windows，本地 light）结果为 `155 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算与非法目标/篡改测试，但仍未形成固定 benchmark。
+- 前端门禁：Web Console `npm test -- --run` 为 `20 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
 - Python 轻量门禁：`python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有既存 import/style/type-datetime 规则问题，不能称为完整 lint 通过。
 - 本轮流程收敛：场景启动、审批后执行和 API 启动恢复均通过 `LocalExerciseWorkflow`；审批决定不再直接写入 action/recovery fixture 事件。
 - 限制：Temporal Server replay、PostgreSQL migration、full Kubernetes/observability E2E、数据库绑定审批授权和固定评测仍未完成。

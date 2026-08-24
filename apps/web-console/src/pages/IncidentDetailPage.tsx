@@ -150,7 +150,8 @@ export function IncidentDetailPage() {
         approvalsResponse.json() as Promise<{ items?: ApprovalItem[] }>,
       ])
       setOverview(overviewData)
-      setTimeline(previous => mergeTimelineEvents(previous, timelineData.events || []))
+      // 首次加载或路由切换以服务端快照为准，避免把上一个事故的证据带入当前页面。
+      setTimeline(timelineData.events || [])
       setApprovals(approvalsData.items || [])
       setError(null)
     } catch (cause) {
@@ -177,7 +178,12 @@ export function IncidentDetailPage() {
 
   const streamStatus = useSSE(id, handleSSEMessage, Boolean(id))
 
-  useEffect(() => { void fetchData() }, [fetchData])
+  useEffect(() => {
+    setOverview(null)
+    setTimeline([])
+    setApprovals([])
+    void fetchData()
+  }, [fetchData])
   useEffect(() => () => {
     if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current)
   }, [])

@@ -342,13 +342,21 @@ class ActionGate:
                 errors.append(f"未知参数: {key}")
                 continue
             prop = properties[key]
-            if prop.get("type") == "integer":
-                if not isinstance(value, int):
+            expected_type = prop.get("type")
+            if expected_type == "integer":
+                if isinstance(value, bool) or not isinstance(value, int):
                     errors.append(f"参数 {key} 应为整数")
                 elif "minimum" in prop and value < prop["minimum"]:
                     errors.append(f"参数 {key} 小于最小值 {prop['minimum']}")
                 elif "maximum" in prop and value > prop["maximum"]:
                     errors.append(f"参数 {key} 大于最大值 {prop['maximum']}")
+            elif expected_type == "string":
+                if not isinstance(value, str):
+                    errors.append(f"参数 {key} 应为字符串")
+                elif "minLength" in prop and len(value) < prop["minLength"]:
+                    errors.append(f"参数 {key} 短于最小长度 {prop['minLength']}")
+                elif "maxLength" in prop and len(value) > prop["maxLength"]:
+                    errors.append(f"参数 {key} 超过最大长度 {prop['maxLength']}")
 
         return errors
 

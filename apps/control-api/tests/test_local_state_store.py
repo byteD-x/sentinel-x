@@ -1,6 +1,6 @@
 """本地隔离状态库的持久化恢复测试。"""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from demo.scenarios.loader import ScenarioLoader
@@ -129,3 +129,80 @@ def test_approved_local_workflow_resumes_without_duplicate_action_after_restart(
         event.event_type for event in restarted_store.get_timeline(incident.id)
     ].count("action.started") == 1
     assert restarted_store.get_workflow_checkpoint(incident.id)["completed"] is True
+
+
+def test_planning_checkpoint_recovers_without_recursive_resume(tmp_path):
+    """计划检查点落盘后崩溃，重启应补建审批而不是递归推进。"""
+    scenario_dir = Path(__file__).resolve().parents[3] / "demo" / "scenarios"
+    scenario = ScenarioLoader(scenario_dir).get("inventory-latched-5xx@1")
+    assert scenario is not None
+    store = InMemoryStore(state_path=tmp_path / "planning-crash.sqlite3")
+    incident = store.create_incident(
+        IncidentCreate(
+            alert_source=AlertSource(
+                alertmanager_id="planning-crash",
+                fingerprint="planning-crash-fingerprint",
+                alert_name="Inventory latch",
+                severity=IncidentSeverity.WARNING,
+                description="inventory-api returns latched 5xx",
+                started_at=datetime(2026, 8, 9, 12, 0, 0),
+            )
+        )
+    )
+    store.set_status(incident, IncidentStatus.TRIAGING, "故障已确认")
+    store.set_status(incident, IncidentStatus.DIAGNOSING, "证据已收集")
+    store.set_status(incident, IncidentStatus.PLAN_PROPOSED, "计划已生成")
+    store.create_workflow_checkpoint(
+        incident_id=incident.id,
+        scenario_id=scenario.id,
+        phase="planning",
+    )
+
+    workflow = LocalExerciseWorkflow(store)
+    workflow.resume(incident.id)
+
+    approvals = store.list_approvals(incident.id)
+    assert len(approvals) == 1
+    assert store.get_workflow_checkpoint(incident.id)["phase"] == "awaiting_approval"
+
+
+def test_approved_expired_workflow_escalates_without_action(tmp_path):
+    """批准后停机超过有效期，恢复必须拒绝动作并升级人工。"""
+    scenario_dir = Path(__file__).resolve().parents[3] / "demo" / "scenarios"
+    scenario = ScenarioLoader(scenario_dir).get("inventory-latched-5xx@1")
+    assert scenario is not None
+    store = InMemoryStore(state_path=tmp_path / "expired-approval.sqlite3")
+    incident = store.create_incident(
+        IncidentCreate(
+            alert_source=AlertSource(
+                alertmanager_id="expired-approval",
+                fingerprint="expired-approval-fingerprint",
+                alert_name="Inventory latch",
+                severity=IncidentSeverity.WARNING,
+                description="inventory-api returns latched 5xx",
+                started_at=datetime(2026, 8, 9, 12, 0, 0),
+            )
+        )
+    )
+    workflow = LocalExerciseWorkflow(store)
+    workflow.start(incident.id, scenario)
+    approval = store.list_approvals(incident.id)[0]
+    store.decide_approval(
+        approval["id"],
+        ApprovalDecision(approved=True, reason="已批准"),
+        decided_by="approver",
+        incident_id=incident.id,
+    )
+    approval["expires_at"] = (datetime.now() - timedelta(minutes=1)).isoformat()
+    store.flush()
+
+    workflow.resume(incident.id)
+
+    restored = store.get_incident(incident.id)
+    assert restored is not None
+    assert restored.status is IncidentStatus.ESCALATED
+    assert store.list_approvals(incident.id)[0]["status"] == "expired"
+    assert not any(
+        event.event_type == "action.started"
+        for event in store.get_timeline(incident.id)
+    )

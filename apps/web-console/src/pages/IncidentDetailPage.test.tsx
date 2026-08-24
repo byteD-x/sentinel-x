@@ -2,7 +2,7 @@
 
 import '@testing-library/jest-dom/vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch } from '../lib/api'
 import { IncidentDetailPage } from './IncidentDetailPage'
@@ -86,6 +86,11 @@ function renderPage() {
   )
 }
 
+function NavigationHarness() {
+  const navigate = useNavigate()
+  return <button onClick={() => navigate('/incidents/incident-2')}>切换事故</button>
+}
+
 beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async input => {
     const path = String(input)
@@ -118,5 +123,42 @@ describe('IncidentDetailPage', () => {
 
     expect(await screen.findByText('当前角色不能提交审批决定')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '批准恢复' })).not.toBeInTheDocument()
+  })
+
+  it('resets the timeline when navigating to another incident', async () => {
+    vi.mocked(apiFetch).mockImplementation(async input => {
+      const path = String(input)
+      if (path.endsWith('/timeline')) {
+        const incidentId = path.includes('incident-2') ? 'incident-2' : 'incident-1'
+        return {
+          json: async () => ({
+            events: [{
+              id: `event-${incidentId}`,
+              sequence: 1,
+              event_type: 'incident.created',
+              actor: 'system',
+              payload: { reason: incidentId === 'incident-1' ? '事故一证据' : '事故二证据' },
+              timestamp: '2026-08-09T10:00:00Z',
+            }],
+          }),
+        } as Response
+      }
+      if (path.endsWith('/approvals')) return { json: async () => ({ items: [] }) } as Response
+      return { json: async () => ({ ...overview, id: path.includes('incident-2') ? 'incident-2' : 'incident-1' }) } as Response
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/incidents/incident-1']}>
+        <NavigationHarness />
+        <Routes>
+          <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('事故一证据')).toBeInTheDocument()
+    screen.getByRole('button', { name: '切换事故' }).click()
+    expect(await screen.findByText('事故二证据')).toBeInTheDocument()
+    expect(screen.queryByText('事故一证据')).not.toBeInTheDocument()
   })
 })

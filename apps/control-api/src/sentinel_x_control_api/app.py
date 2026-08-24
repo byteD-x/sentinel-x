@@ -658,6 +658,15 @@ class InMemoryStore:
         self.flush()
         return approval
 
+    def expire_approval(self, approval_id: str) -> Optional[dict]:
+        """在恢复或后台扫描时将已过期审批标记为不可执行。"""
+        approval = self._approvals.get(approval_id)
+        if not approval or approval["status"] in {"rejected", "expired"}:
+            return approval
+        approval["status"] = "expired"
+        self.flush()
+        return approval
+
 # ---------------------------------------------------------------------------
 # 全局存储实例
 # ---------------------------------------------------------------------------
@@ -1100,7 +1109,12 @@ async def get_incident(
         latest_verification=_latest_verification(incident),
         capabilities=IncidentCapabilities(
             can_decide_approval=bool(approval and normalized_role == "approver"),
-            can_view_raw_evidence=True,
+            can_view_raw_evidence=normalized_role in {
+                "approver",
+                "planner",
+                "scenario_operator",
+                "system",
+            },
             denial_reason=(
                 None
                 if normalized_role == "approver"

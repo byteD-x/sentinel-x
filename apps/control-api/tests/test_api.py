@@ -490,7 +490,14 @@ class TestIncidents:
         assert response.status_code == 200
         capabilities = response.json()["capabilities"]
         assert capabilities["can_decide_approval"] is False
+        assert capabilities["can_view_raw_evidence"] is False
         assert capabilities["denial_reason"] == "当前角色不能提交审批决定"
+
+        operator_response = await client.get(
+            f"/api/incidents/{started.json()['incident_id']}",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+        assert operator_response.json()["capabilities"]["can_view_raw_evidence"] is True
 
 
 @pytest.mark.asyncio

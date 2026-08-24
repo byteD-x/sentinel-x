@@ -30,7 +30,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 ### 已验证
 
 - Python 测试：`pytest -q` 与 `python -m pytest -v --tb=short --asyncio-mode=auto`，本次运行 **161 passed**。
-- Web Console：`npm run test` 为 **23 passed**，`npm run build`、`npm run lint` 通过。
+- Web Console：`npm run test -- --run` 为 **20 passed**，`npm run build`、`npm run lint` 通过。
 - Terminal Console：`npm test` 为 **7 passed**，`npm run build` 通过。
 - Web UI 合约脚本：`node scripts/ui-contract.test.mjs` 通过。
 - Action Gateway、状态机、Alert Ingress HMAC、角色门控、审批过期/篡改/幂等和本地 SQLite 快照均有测试覆盖。
@@ -38,14 +38,14 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 ### 未验证或当前明确不具备
 
 - Python Ruff 轻量门禁 `python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有 236 个既存风格/类型/时区提示，不能把完整 lint 记为通过。
-- 直接执行 `pytest -q` 会在收集阶段因 `ModuleNotFoundError: No module named 'demo'` 失败；说明测试入口依赖当前解释器路径，尚未达到稳定的干净环境门禁。
+- 当前 `python -m pytest -q` 可在本地环境完成 **155 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
 - Temporal Server replay、Worker 真正注册、Signal/Activity 重启恢复未完成。
 - PostgreSQL migration、projection/outbox、DB 绑定审批和跨进程原子消费未完成。
 - Prometheus/Loki/Tempo/OTel full profile 查询未完成；诊断与动作仍存在模拟路径。
 - Action Gateway 当前为 fixture 执行，不写真实 Kubernetes；恢复验证代码存在“始终成功”的确定性测试路径。
 - 正式 `/api/v1`、会话认证、CSRF、ETag、正式幂等契约尚未收敛。
 - 六场景固定 benchmark、holdout 数据集、第二个干净环境 cold run 和可发布证据包未完成。
-- 仓库没有 `.github/workflows` 或其他 CI 配置，也没有产品事件埋点/漏斗数据实现。
+- 仓库已有 `.github/workflows/quality.yml`，但尚未有远端 CI run 证据；产品事件埋点/漏斗数据实现仍未完成。
 
 ### 关键证据索引
 

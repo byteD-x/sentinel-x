@@ -26,7 +26,7 @@ Alertmanager 请求使用独立 HMAC 密钥和 headers：
 - `X-Sentinel-Timestamp`
 - `X-Sentinel-Signature: sha256=<hex>`
 
-签名输入为 `timestamp + "\n" + raw_body`。Control API 校验允许时钟偏差、常量时间比较、body 上限和最近签名重放缓存。示例文档不提供真实密钥。
+签名输入为 `timestamp + "\n" + nonce + "\n" + raw_body`。Control API 校验允许时钟偏差、常量时间比较、body 上限和 local profile 的有界 nonce 重放缓存。示例文档不提供真实密钥。
 
 ### 2.3 Worker 到 Action Gateway
 

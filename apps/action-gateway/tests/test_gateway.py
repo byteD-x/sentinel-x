@@ -214,6 +214,30 @@ class TestRejections:
         ))
         assert resp.status_code == 400
 
+    async def test_boolean_is_not_accepted_as_integer_replicas(self, client):
+        resp = await client.post("/api/actions", json=_make_request(
+            runbook_ref="scale_deployment@1",
+            target="order-api",
+            parameters={"replicas": True},
+        ))
+        assert resp.status_code == 400
+        assert "应为整数" in resp.json()["detail"]
+
+    async def test_string_schema_enforces_type_and_max_length(self, client):
+        wrong_type = await client.post("/api/actions", json=_make_request(
+            target="order-api",
+            parameters={"reason": 123},
+        ))
+        assert wrong_type.status_code == 400
+        assert "应为字符串" in wrong_type.json()["detail"]
+
+        too_long = await client.post("/api/actions", json=_make_request(
+            target="inventory-api",
+            parameters={"reason": "x" * 501},
+        ))
+        assert too_long.status_code == 400
+        assert "最大长度" in too_long.json()["detail"]
+
     async def test_expired_approval_rejected(self, client):
         data = _make_request()
         data["approval_expires_at"] = (

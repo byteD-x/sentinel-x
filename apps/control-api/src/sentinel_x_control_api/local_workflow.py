@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +122,9 @@ class LocalExerciseWorkflow:
             )
             return
 
-        self.store.update_workflow_checkpoint(incident_id, phase="investigating")
+        checkpoint = self.store.get_workflow_checkpoint(incident_id)
+        if not checkpoint or checkpoint["phase"] != "planning":
+            self.store.update_workflow_checkpoint(incident_id, phase="investigating")
         primary_fault = scenario.faults[0]
         target = primary_fault.target_service
 
@@ -140,7 +143,7 @@ class LocalExerciseWorkflow:
             self.store.set_status(incident, IncidentStatus.TRIAGING, "故障注入已确认")
         if incident.status == IncidentStatus.TRIAGING:
             self.store.set_status(incident, IncidentStatus.DIAGNOSING, "开始关联受限诊断信号")
-        if incident.status != IncidentStatus.DIAGNOSING:
+        if incident.status not in {IncidentStatus.DIAGNOSING, IncidentStatus.PLAN_PROPOSED}:
             self.resume(incident_id)
             return
 
@@ -240,6 +243,11 @@ class LocalExerciseWorkflow:
     def _execute_and_verify(self, incident_id: str, approval: dict) -> None:
         incident = self.store.get_incident(incident_id)
         if incident is None:
+            return
+        expires_at = datetime.fromisoformat(approval["expires_at"])
+        if datetime.now(tz=expires_at.tzinfo) > expires_at:
+            self.store.expire_approval(approval["id"])
+            self._escalate(incident_id, "批准已过期，禁止执行并升级人工处理")
             return
         checkpoint = self.store.get_workflow_checkpoint(incident_id)
         if checkpoint is None:
