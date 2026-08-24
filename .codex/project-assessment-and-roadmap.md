@@ -29,8 +29,8 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 ### 已验证
 
-- Python 测试：`pytest -q` 与 `python -m pytest -v --tb=short --asyncio-mode=auto`，本次运行 **161 passed**。
-- Web Console：`npm run test -- --run` 为 **20 passed**，`npm run build`、`npm run lint` 通过。
+- Python 测试：`python -m pytest -q`，本次运行 **167 passed**。
+- Web Console：`npm run test -- --run` 为 **24 passed**，`npm run build`、`npm run lint` 通过。
 - Terminal Console：`npm test` 为 **7 passed**，`npm run build` 通过。
 - Web UI 合约脚本：`node scripts/ui-contract.test.mjs` 通过。
 - Action Gateway、状态机、Alert Ingress HMAC、角色门控、审批过期/篡改/幂等和本地 SQLite 快照均有测试覆盖。
@@ -38,7 +38,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 ### 未验证或当前明确不具备
 
 - Python Ruff 轻量门禁 `python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有 236 个既存风格/类型/时区提示，不能把完整 lint 记为通过。
-- 当前 `python -m pytest -q` 可在本地环境完成 **155 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
+- 当前 `python -m pytest -q` 可在本地环境完成 **167 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
 - Temporal Server replay、Worker 真正注册、Signal/Activity 重启恢复未完成。
 - PostgreSQL migration、projection/outbox、DB 绑定审批和跨进程原子消费未完成。
 - Prometheus/Loki/Tempo/OTel full profile 查询未完成；诊断与动作仍存在模拟路径。
