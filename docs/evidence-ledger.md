@@ -17,19 +17,19 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `180 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、六场景 fixture evaluator、SLO 观测窗口和 Temporal durable thin slice 测试，但仍未形成固定 benchmark。
+- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `181 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、六场景 fixture evaluator、SLO 观测窗口和 Temporal durable thin slice 测试，但仍未形成固定 benchmark。
 - 前端门禁：Web Console `npm test -- --run` 为 `24 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
 - Python 轻量门禁：`python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有既存 import/style/type-datetime 规则问题，不能称为完整 lint 通过。
 - 本轮流程收敛：场景启动、审批后执行和 API 启动恢复均通过 `LocalExerciseWorkflow`；审批决定不再直接写入 action/recovery fixture 事件。
 - SLO 验证切片：`verify_slo_recovery` 不再固定成功，兼容 Workflow 与 Temporal Activity 都要求显式观测样本并拒绝空窗口、样本不足和超阈值；当前输入仍是 Activity 调用方提供的受控数据，未连接 Prometheus/真实观测源。
-- Temporal durable thin slice：Temporal SDK 测试服务器实际执行 `SentinelIncidentWorkflow`，覆盖审批 Signal、三类 Activity、Activity retry policy、审批过期/计划哈希校验，并对完成 history replay 通过；范围仅为单场景原型，尚未覆盖 Worker 重启、PostgreSQL projection/outbox、跨进程审批消费或六场景 full profile。
+- Temporal durable thin slice：Temporal SDK 测试服务器实际执行 `SentinelIncidentWorkflow`，覆盖审批 Signal、三类 Activity、Activity retry policy、审批过期/计划哈希校验、独立本地测试服务器上的 Worker 重启，并对完成 history replay 通过；范围仅为单场景原型，尚未覆盖 PostgreSQL projection/outbox、跨进程审批消费或六场景 full profile。
 - 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定评测仍未完成。
 
 ## 2. Claim 台账
 
 | ID | 可对外声明主题 | 当前 | 当前可用表述 | 升级所需证据 |
 | --- | --- | --- | --- | --- |
-| CLM-01 | 持久化事故工作流 | I/T(partial) | “单场景 `SentinelIncidentWorkflow` 已在 Temporal SDK 测试服务器执行并 replay；完整多场景、Worker restart 和投影对账仍未完成” | Worker restart、history refs、PostgreSQL projection/outbox、原始日志 |
+| CLM-01 | 持久化事故工作流 | I/T(partial) | “单场景 `SentinelIncidentWorkflow` 已在 Temporal SDK 测试服务器执行、完成 history replay，并通过独立本地测试服务器的 Worker restart；完整多场景和投影对账仍未完成” | history refs、PostgreSQL projection/outbox、原始日志 |
 | CLM-02 | 跨指标/日志/Trace/K8s 调查 | D | “定义了四类受限诊断工具与 Evidence 引用协议” | full E2E、工具审计、Top-1 report |
 | CLM-03 | 根因 Top-1 | D | “建立了 Top-1 与 B0/B1/C1 评测协议” | holdout dataset、样本数、模型/版本、原始报告 |
 | CLM-04 | 安全审批与受控动作 | I/T(partial) | “light Alert Ingress 校验时间戳、nonce、HMAC 并拒绝同 nonce 重放；Control API 创建审批时重算 MVP policy、目标和 canonical plan hash；Action Gateway 默认 fail-closed，校验 HMAC 审批凭证、独立审批记录、目标身份、Runbook/目标/参数/hash/expiry 和进程内一次性消费；动作仍为 fixture” | DB 绑定 approval、TokenReview、跨进程/重启重放、真实目标 UID/generation 读取和 fake K8s 执行测试 |
