@@ -4,58 +4,63 @@
 
 Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light 本地原型**：已经具备可运行的事故指挥台、固定故障目录、状态机、审批界面、Action Gateway 门控、SSE 时间线和本地评测归档，但尚未完成 full MVP 所需的真实持久工作流、数据库投影、观测栈、Kubernetes 动作和固定 benchmark。
 
+状态标记：`[已完成]` 表示已有代码和可重复测试证据；`[部分完成]` 表示 light 或 thin slice 已落地但 full profile 仍缺门禁；`[未完成]` 表示仍停留在设计、fixture 或 proposed。
+
 综合判断：
 
 | 维度 | 当前判断 | 说明 |
 | --- | --- | --- |
 | 产品/架构设计 | 较成熟 | 产品需求、状态机、安全边界、Runbook、评测口径和发布门禁文档较完整 |
-| Light 原型可演示度 | 中高 | 本地 API、Web Console、Terminal Console 和六个场景 fixture 可运行 |
-| Full MVP 完成度 | 低到中 | 关键链路仍是 fixture/proposed，不能按生产或完整 E2E 宣称 |
-| 生产可用度 | 不具备 | 无正式身份认证、无 PostgreSQL 权威投影、无 Temporal replay 证据、无真实执行器闭环 |
+| Light 原型可演示度 | 中高 | 本地 API、Web Console、Terminal Console 和六个场景 fixture 可运行；Temporal/审批/SLO 已有可验证 thin slice |
+| Full MVP 完成度 | 中 | Temporal durable thin slice、观测样本验证和 SQLite 审批持久化已落地，但 PostgreSQL、真实 K8s、full E2E 和 benchmark 仍未完成 |
+| 生产可用度 | 不具备 | 无正式身份认证、无 PostgreSQL 权威投影、真实执行器和 full 观测闭环仍未完成 |
 | 面试展示价值 | 高 | 能展示 Agent 边界、状态机、审批、幂等、失败升级和证据账本；必须主动披露限制 |
 
-这里的“完成度”是基于代码、文档和本地命令的工程判断，不是正式 KPI。若按产品 MVP 的 11 项功能需求粗略折算，当前大约处于 **35%–45% 的可验收完成度**：大部分有设计和 fixture，真正达到 full E2E 验收的部分仍很少。
+这里的“完成度”是基于代码、文档和本地命令的工程判断，不是正式 KPI。若按产品 MVP 的 11 项功能需求粗略折算，当前大约处于 **45%–55% 的可验收完成度**：light 与单场景 durable thin slice 已有测试证据，但真正达到 full E2E 验收的部分仍有限。
 
 ## 2. 证据与验证基线
 
 ### 本轮已落地
 
-- 修复 `pytest -q` 的仓库根路径问题，并将 `make test-e2e` 统一为 `python -m pytest`。
-- 新增 `.github/workflows/quality.yml`，覆盖 Python 测试/轻量 Ruff、Web Console、Terminal Console。
-- Alert Ingress 增加时间戳 + nonce + HMAC，有界 replay cache 和重复 nonce 拒绝。
-- Control API 创建审批时重新执行 MVP policy、风险等级和 canonical plan hash 校验。
-- 场景启动统一进入 `LocalExerciseWorkflow`；审批决定只记录用户意图，执行/验证由编排器推进；API 启动时恢复未完成 checkpoint。
-- 对本地快照中的 orphan checkpoint 做安全清理，避免旧测试状态阻塞启动。
+- `[已完成]` 修复 `pytest -q` 的仓库根路径问题，并将 `make test-e2e` 统一为 `python -m pytest`。
+- `[已完成]` 新增 `.github/workflows/quality.yml`，覆盖 Python 测试/轻量 Ruff、Web Console、Terminal Console。
+- `[已完成]` Alert Ingress 增加时间戳 + nonce + HMAC，有界 replay cache 和重复 nonce 拒绝。
+- `[已完成]` Control API 创建审批时重新执行 MVP policy、风险等级和 canonical plan hash 校验。
+- `[已完成]` 场景启动统一进入 `LocalExerciseWorkflow`；审批决定只记录用户意图，执行/验证由编排器推进；API 启动时恢复未完成 checkpoint。
+- `[已完成]` 对本地快照中的 orphan checkpoint 做安全清理，避免旧测试状态阻塞启动。
+- `[已完成]` `SentinelIncidentWorkflow` 已注册 Temporal Workflow/Activity，覆盖审批 Signal、Activity retry、history replay 和独立本地 Temporal Server 上的 Worker 重启恢复。
+- `[已完成]` SLO 恢复验证改为基于显式观测样本，兼容 Workflow 与 Temporal Activity 均拒绝空窗口、样本不足和超阈值。
+- `[已完成]` Action Gateway 增加可选 SQLite 审批存储，覆盖不可变登记、重启恢复、撤销和跨连接原子消费；默认 light 仍可使用内存存储。
 
 ### 已验证
 
-- Python 测试：`python -m pytest -q`，本次运行 **170 passed**。
+- Python 测试：`python -m pytest -q`，2026-08-25 本地 Windows 运行 **185 passed**。
 - Web Console：`npm run test -- --run` 为 **24 passed**，`npm run build`、`npm run lint` 通过。
 - Terminal Console：`npm test` 为 **7 passed**，`npm run build` 通过。
 - Web UI 合约脚本：`node scripts/ui-contract.test.mjs` 通过。
-- Action Gateway、状态机、Alert Ingress HMAC、角色门控、审批过期/篡改/幂等和本地 SQLite 快照均有测试覆盖。
+- Action Gateway、状态机、Alert Ingress HMAC、角色门控、审批过期/篡改/幂等、本地 SQLite 快照、SQLite 审批存储、Temporal replay/restart 和 SLO 观测窗口均有测试覆盖。
 
 ### 未验证或当前明确不具备
 
 - Python Ruff 轻量门禁 `python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有 236 个既存风格/类型/时区提示，不能把完整 lint 记为通过。
-- 当前 `python -m pytest -q` 可在本地环境完成 **170 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
-- Temporal Server replay、Worker 真正注册、Signal/Activity 重启恢复未完成。
-- PostgreSQL migration、projection/outbox、DB 绑定审批和跨进程原子消费未完成。
-- Prometheus/Loki/Tempo/OTel full profile 查询未完成；诊断与动作仍存在模拟路径。
-- Action Gateway 当前为 fixture 执行，不写真实 Kubernetes；恢复验证已改为受控观测样本输入，但仍未连接真实观测源。
-- 正式 `/api/v1`、会话认证、CSRF、ETag、正式幂等契约尚未收敛。
-- 六场景固定 benchmark、holdout 数据集、第二个干净环境 cold run 和可发布证据包未完成。
-- 仓库已有 `.github/workflows/quality.yml`，但尚未有远端 CI run 证据；产品事件埋点/漏斗数据实现仍未完成。
+- 当前 `python -m pytest -q` 可在本地 Windows 环境完成 **185 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
+- `[部分完成]` Temporal Server replay、Worker 注册、Signal/Activity retry 和 Worker 重启已在单场景 thin slice 验证；多场景 full profile、history refs 对账和 PostgreSQL projection 仍未完成。
+- `[部分完成]` Action Gateway SQLite 审批存储已支持重启恢复和跨连接原子消费；PostgreSQL migration、projection/outbox、Control API 到 Gateway 的 DB 绑定审批和跨服务事务仍未完成。
+- `[未完成]` Prometheus/Loki/Tempo/OTel full profile 查询未完成；诊断与动作仍存在模拟路径。
+- `[未完成]` Action Gateway 当前为 fixture 执行，不写真实 Kubernetes；恢复验证虽已改为受控观测样本输入，但仍未连接真实观测源。
+- `[未完成]` 正式 `/api/v1`、会话认证、CSRF、ETag、正式幂等契约尚未收敛。
+- `[未完成]` 六场景固定 benchmark、holdout 数据集、第二个干净环境 cold run 和可发布证据包未完成。
+- `[部分完成]` 仓库已有 `.github/workflows/quality.yml`，本地门禁通过；尚未有远端 CI run 证据，产品事件埋点/漏斗数据实现仍未完成。
 
 ### 关键证据索引
 
 - 当前定位与限制： [README.md](../README.md:7)、[README.md](../README.md:162)。
 - 发布状态与阻塞： [docs/release-readiness.md](../docs/release-readiness.md:8)、[docs/release-readiness.md](../docs/release-readiness.md:45)。
 - Claim 等级与证据缺口： [docs/evidence-ledger.md](../docs/evidence-ledger.md:20)、[docs/evidence-ledger.md](../docs/evidence-ledger.md:28)。
-- 真实 Worker 尚未注册： [apps/incident-worker/src/sentinel_x_incident_worker/worker.py](../apps/incident-worker/src/sentinel_x_incident_worker/worker.py:39)。
+- Temporal Worker 注册与运行入口： [apps/incident-worker/src/sentinel_x_incident_worker/worker.py](../apps/incident-worker/src/sentinel_x_incident_worker/worker.py:85)；Workflow/Activity 注册与 replay 测试： [apps/incident-worker/src/sentinel_x_incident_worker/temporal_runtime.py](../apps/incident-worker/src/sentinel_x_incident_worker/temporal_runtime.py:140)。
 - 动作仍为 fixture： [apps/action-gateway/src/sentinel_x_action_gateway/app.py](../apps/action-gateway/src/sentinel_x_action_gateway/app.py:362)。
 - 验证路径已要求显式观测样本并覆盖空窗口/样本不足/超阈值失败： [apps/incident-worker/src/sentinel_x_incident_worker/activities.py](../apps/incident-worker/src/sentinel_x_incident_worker/activities.py:254)；真实观测源仍未接入。
-- 本地内存状态 + SQLite 快照： [apps/control-api/src/sentinel_x_control_api/app.py](../apps/control-api/src/sentinel_x_control_api/app.py:240)。
+- 本地内存状态 + SQLite 快照： [apps/control-api/src/sentinel_x_control_api/app.py](../apps/control-api/src/sentinel_x_control_api/app.py:240)；Gateway SQLite 审批存储： [apps/action-gateway/src/sentinel_x_action_gateway/approval_store.py](../apps/action-gateway/src/sentinel_x_action_gateway/approval_store.py:117)。
 - 目标路线和验收项： [docs/engineering-backlog.md](../docs/engineering-backlog.md:50)。
 
 ## 3. 角色一：项目经理视角
@@ -69,12 +74,12 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | 优先级 | 缺陷 | 项目影响 | 处理原则 |
 | --- | --- | --- | --- |
 | P0 | light、full、fixture、真实能力的验收边界分散在多份文档 | 容易出现“代码存在=功能完成”的误判 | 建立单一 Release Readiness 看板，每项只允许 `DESIGNED/IMPLEMENTED/TESTED/MEASURED` 一种状态 |
-| P0 | Temporal、PostgreSQL、Kubernetes、观测栈都在关键路径上，但缺少可独立验收的垂直切片 | 开发周期长，晚期才发现架构不可行 | 先做一条“单场景、单 R1、单报告”的 full thin slice，再扩展六场景 |
-| P0 | Alert Ingress 只有时间窗 HMAC，没有 nonce/replay cache；审批入口也未在 Control API 端重新计算 policy/plan hash | 重放告警、错误 R1 或伪造审批可能进入本地流程 | 先补 ingress 幂等/重放拒绝，再做服务器端审批绑定和原子消费 |
-| P1 | 没有 CI 自动门禁 | 本地通过无法转化为团队持续质量 | 先接入 Python test、Web test/build/lint、Terminal test/build，后接安全和 E2E |
+| P0 | `[部分完成]` Temporal 已有单场景可验收垂直切片，但 PostgreSQL、Kubernetes、观测栈仍在关键路径 | 剩余 full profile 依赖较多，仍可能晚期暴露集成问题 | 以现有 `inventory-latched-5xx@1` 为基线补 PostgreSQL projection/outbox 和 fake K8s，再扩展六场景 |
+| P0 | `[已完成]` Alert Ingress 已有时间窗、nonce、HMAC 和有界 replay cache；Control API 已服务器端重算 policy/plan hash | 原有重放和错误 R1 风险已在 light 测试中收敛 | 继续补正式 webhook 契约、远端 CI 和 full profile 证据 |
+| P1 | `[已完成]` 已建立 CI 自动门禁 | 本地质量可以持续检查，但尚无远端 CI run 证据 | 保留 Python/Web/Terminal 门禁，后接安全和 E2E |
 | P1 | 没有实时交付指标 | 无法判断是否在收敛 | 每周只跟踪 5 个指标：D2 门禁关闭数、阻断缺陷数、full E2E 通过数、脏环境次数、证据包完整率 |
 | P1 | 尚无版本化演示/benchmark 产物 | 面试或评审结果不可复查 | 固定 commit、scenario、policy、prompt、model、dataset、profile 和报告 hash |
-| P1 | Control API、领域状态机和场景启动各自推进状态；LocalExerciseWorkflow 的 `resume_all` 未接入 API lifespan | 进程重启恢复与状态合法性无法作为统一承诺 | 只保留一个编排入口，所有状态转换调用共享状态机，启动时显式恢复未完成 checkpoint |
+| P1 | `[部分完成]` 场景启动、审批后执行和 API 启动恢复已收敛到 `LocalExerciseWorkflow`；Temporal thin slice 也已独立注册 | light checkpoint 与单场景 Temporal 可恢复，但 Control API/PostgreSQL 投影尚未统一 | 继续建立 Temporal/PostgreSQL 对账和 full projection |
 
 ### 项目经理验收口径
 
@@ -88,7 +93,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 - 值班工程师可以在一个控制台看到事故、场景、证据摘要、假设、审批和时间线。
 - 审批者可以看到 Runbook、目标、参数、风险等级、过期时间和 plan hash，并进行批准/拒绝。
-- 平台/安全工程师可以演示 fail-closed、R2/R3 拒绝、目标白名单、HMAC 审批凭证和进程内幂等。
+- 平台/安全工程师可以演示 fail-closed、R2/R3 拒绝、目标白名单、HMAC 审批凭证和内存/SQLite 一次性消费边界。
 - 面试或培训用户可以复现六个版本化故障分支，并观察自动恢复、待审批和升级人工的不同结果。
 
 ### 用户缺陷与风险
@@ -98,9 +103,9 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | P0 | 页面展示的证据、恢复和执行结果部分来自 fixture/模拟数据 | 用户可能把演示结果误认为真实观测结论 | 所有页面统一显示 `fixture/live/replay`、profile 和数据新鲜度；真实数据未接入时禁用“已恢复”强语义 |
 | P0 | 角色由 `X-Sentinel-Role` 本地 header 门控 | 任何能调用本地 API 的人都可能伪造角色 | light 保持 local-only 明示；full 实现服务端会话/OIDC、CSRF、职责分离和审计身份 |
 | P0 | Action Gateway 不连接真实目标，SLO 验证仅接受受控样本 | 用户无法证明动作真的改变业务状态 | 先接 fake K8s API 做真实状态变更和失败注入，再接隔离 kind/k3d；验证必须读取真实 observed window |
-| P0 | Gateway 只检查请求体带来的 approval_id/expiry/hash，未从独立数据库读取不可变批准记录，也未校验 namespace、UID/generation | 持有共享凭证的调用者可能伪造批准或面对目标漂移执行 | Gateway 使用独立 DB 角色、TokenReview/mTLS、目标身份绑定和一次性原子消费 |
+| P0 | `[部分完成]` Gateway 已从独立 ApprovalStore 读取不可变记录，并校验 namespace/kind/name/UID/generation、expiry、hash；SQLite backend 已支持跨连接原子消费 | PostgreSQL 权威审批、TokenReview/mTLS、跨服务事务和真实目标状态仍未完成 | 接入 PostgreSQL 专用 DB role、服务身份校验和真实目标 UID/generation 读取 |
 | P1 | 事故回放目前主要是内存/SQLite 快照，导出包和持久 SSE 仍未完成 | 刷新、重启、复盘和跨人协作可信度不足 | PostgreSQL timeline/outbox + SSE gap/reconnect + 脱敏事故包 hash |
-| P1 | 真实审批完成后，Control API 当前可直接写入 action/recovery 事件并标记 RESOLVED | UI 看到的“执行成功”不等于 Gateway 或业务真实成功 | 终态只能由执行结果协调和真实 SLO VerificationResult 推进，动作成功与恢复成功分离 |
+| P1 | `[部分完成]` LocalExerciseWorkflow 已将审批决定与 action/recovery 推进分离，SLO 验证要求观测样本；真实审批投影仍未完全接入 | fixture 或受控样本不能证明业务真实恢复 | 终态只能由 Gateway 执行结果协调和真实 SLO VerificationResult 推进，动作成功与恢复成功分离 |
 | P1 | 缺少用户级过滤、搜索、证据新鲜度和“为什么升级人工”的统一解释 | 故障多时认知负担高 | 先补状态/严重度/服务/时间过滤、稳定拒绝码和统一升级原因，不扩展无关图表 |
 | P2 | 无产品行为埋点 | 无法知道用户是否完成查看、审批、回放和演练 | 只采集合成环境事件：scenario_started、incident_opened、evidence_viewed、approval_decided、replay_completed |
 
@@ -115,7 +120,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 1. **边界意识**：模型不持有执行器写权限，Action Gateway 独立 fail-closed，R2/R3 禁止，遥测被视为不可信输入。
 2. **状态建模**：共享 contracts/domain 状态机覆盖正常、升级、失败和自动恢复分支，避免各模块自造状态。
 3. **安全动作设计**：Runbook allowlist、目标/参数/schema、plan hash、过期、audience、HMAC 和幂等检查有对应测试。
-4. **可恢复思路**：已有本地 SQLite checkpoint 和不重复动作测试，且明确它不能替代 Temporal/PostgreSQL。
+4. **可恢复思路**：已有本地 SQLite checkpoint、Temporal history replay/Worker restart 和 SQLite 审批记录恢复测试，且明确它们不能替代 PostgreSQL projection/outbox。
 5. **证据纪律**：evidence ledger 区分 Designed、Implemented、Tested、Measured、Published，避免把 demo 指标写成生产结论。
 6. **前端工程**：React/Vite 页面、SSE 断线重连、序号去重、REST 补读、审批焦点处理和组件测试较完整。
 
@@ -123,9 +128,9 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 | 追问 | 当前真实答案 | 补强方式 |
 | --- | --- | --- |
-| Temporal 是否真的 durable？ | 否，当前是可测试 Python fixture；full profile 会拒绝启动 | 实现真实 Workflow/Activity/Signal，并提交 replay、三点重启和 history 证据 |
+| Temporal 是否真的 durable？ | 单场景 thin slice 是：已在 Temporal SDK 测试服务器执行 Workflow/Activity/Signal、replay 和 Worker restart；多场景 full profile 仍未完成 | 扩展到单场景 DB 投影对账，再提交三处重启、history refs 和 full profile 证据 |
 | Action 是否真的改了 Kubernetes？ | 否，`execution_mode=fixture`，只模拟 before/after | fake K8s API 验证状态变化，再做隔离集群 E2E；加入 timeout/reconcile |
-| 如何保证审批不能被篡改或重放？ | light 进程内有 hash/HMAC/幂等；数据库绑定、跨进程原子消费尚未完成 | PostgreSQL 不可变 ApprovalDecision、唯一约束、目标 UID/generation、TokenReview 和并发测试 |
+| 如何保证审批不能被篡改或重放？ | light 有 hash/HMAC/目标身份校验；SQLite 已覆盖重启恢复和跨连接原子一次性消费；PostgreSQL 绑定和服务身份仍未完成 | PostgreSQL 不可变 ApprovalDecision、唯一约束、目标 UID/generation、TokenReview 和跨服务并发测试 |
 | 根因准确率是多少？ | 没有可对外发布的 Top-1；当前 fixture evaluator 不是 benchmark | 先跑 B0/B1 基线，再跑 C1 holdout，披露样本数、失败分类和区间 |
 | 为什么不用 LangGraph/Kafka？ | 当前设计刻意避免双编排和无必要基础设施 | 说明 Temporal/PostgreSQL 的职责边界和 ADR，展示被拒绝方案及成本 |
 | 测试是否足够？ | light 单元/接口测试较好，full 集成和安全发布门禁不足 | 增加 CI、契约测试、fake K8s、migration、replay、E2E 和攻击集报告 |
@@ -138,7 +143,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 ### P0：先关闭“不能可信交付”的阻断项
 
-#### P0-1：固定 D1 基线与自动门禁（首版已完成）
+#### P0-1：固定 D1 基线与自动门禁 `[已完成（本地）]`
 
 - 新增 CI：Python test、Python 轻量 lint、Web test/build/lint、Terminal test/build。
 - 安装并锁定 `ruff`，在 CI 和本地 `make lint` 中给出明确失败码。
@@ -148,25 +153,25 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 验证：干净环境执行 `make test`、`make lint`；所有失败不得以 skipped 计通过。完整 Ruff 规则清零后，才升级为完整 Python lint 门禁。
 
-#### P0-2：完成 Temporal + PostgreSQL 最小 durable slice（2–3 周）
+#### P0-2：完成 Temporal + PostgreSQL 最小 durable slice（2–3 周）`[部分完成]`
 
-- 先只实现 `inventory-latched-5xx@1`，不扩展场景。
-- Temporal 注册真实 Workflow、Activity、Signal/审批等待和 retry；去掉 full profile 空实现。
-- PostgreSQL 完成 Incident、Timeline、Approval、ActionExecution、VerificationResult 的 migration。
+- `[已完成]` 先实现 `inventory-latched-5xx@1` 的 Temporal durable thin slice，不扩展场景。
+- `[已完成]` Temporal 已注册真实 Workflow、Activity、Signal/审批等待和 retry；full Worker 不再使用空实现降级。
+- `[未完成]` PostgreSQL 尚未完成 Incident、Timeline、Approval、ActionExecution、VerificationResult 的 migration。
 - 将 Alert Ingress 的 fingerprint/nonce 去重、ApprovalDecision 一次决定和 ActionExecution 幂等键放入数据库唯一约束/事务；不要让 API 继续复制一套独立状态转换表。
 - 用 outbox/唯一约束保证 command、审批决定、动作登记和投影可重试；加入 Workflow/DB 对账。
 - API 先收敛 `/api/v1`，同时保留兼容层的明确弃用策略。
 
-验证：Temporal history replay；调查、等待审批、执行返回后三个重启点；重复告警只产生一个 Incident；审批并发只产生一个决定；数据库恢复后 UI 可重建时间线。
+验证：`[已完成]` Temporal history replay、审批等待点 Worker restart、审批/Activity 流程；`[未完成]` 调查/执行返回后三个重启点、重复告警唯一 Incident、数据库恢复后 UI 时间线重建和 Workflow/DB 对账。
 
-#### P0-3：建立真实但安全的执行验证链（2 周）
+#### P0-3：建立真实但安全的执行验证链（2 周）`[部分完成]`
 
-- Action Gateway 先接 fake K8s API，模拟 Deployment UID/generation、patch、timeout、partial ready 和状态未知。
-- 审批绑定数据库记录、目标身份、参数 hash、policy/runbook version、expiry 和一次性消费。
+- `[未完成]` Action Gateway 先接 fake K8s API，模拟 Deployment UID/generation、patch、timeout、partial ready 和状态未知。
+- `[部分完成]` 审批已绑定独立记录、目标身份、参数 hash、expiry 和一次性消费；SQLite 已验证重启/跨连接消费，PostgreSQL 和 policy/runbook version 绑定仍缺失。
 - Gateway 重新读取批准记录并校验 namespace/kind/name/UID/generation；Control API 的审批创建端也必须服务器端重算 policy 与 canonical plan hash。
 - 保持 kill switch 默认开启；在所有负向测试通过前不开放 full R1。
 
-验证：合法 restart/scale 各至少一条成功路径；过期、撤销、重放、目标漂移、参数改写、跨 namespace、Secrets、exec 和 R2/R3 全部拒绝；超时协调后 effect count 为 1。
+验证：`[部分完成]` 合法 restart/scale、过期、撤销、参数改写、目标身份、幂等和 R2/R3 拒绝已有 light 测试；`[未完成]` fake K8s 状态变化、timeout/reconcile、跨 namespace/Secrets/exec 攻击集和真实 effect count 证据。
 
 ### P1：补齐可用的 full Demo MVP
 
@@ -204,16 +209,16 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 ## 7. 30/60/90 天路线图
 
-### 0–30 天：可控交付
+### 0–30 天：可控交付（当前已完成/进行中）
 
-- 关闭 P0-1：CI、ruff、统一 test/lint/build、敏感信息扫描。
-- 完成 Temporal/PostgreSQL spike 和 ADR 结论，不再维护两套“可能的权威流程”。
-- 交付单场景 durable thin slice，R1 仍默认关闭。
-- 产出第一版 evidence manifest 和 D1 基线报告。
+- `[已完成]` 关闭 P0-1 本地门禁：CI、轻量 Ruff、统一 test/lint/build、敏感信息扫描；远端 CI run 证据仍待补充。
+- `[部分完成]` 完成 Temporal spike、Workflow 注册、replay、Signal 和 Worker restart；PostgreSQL migration/outbox 仍未完成。
+- `[已完成]` 交付单场景 durable thin slice，R1 仍默认关闭真实写动作。
+- `[部分完成]` 产出证据账本和 D1 基线记录；正式 evidence manifest、原始报告 hash 和发布包仍未完成。
 
-### 31–60 天：完整 Demo MVP
+### 31–60 天：完整 Demo MVP（下一阶段）
 
-- 完成 fake K8s 执行器、审批数据库绑定、重放/对账/超时协调。
+- 完成 fake K8s 执行器、PostgreSQL 审批数据库绑定、重放/对账/超时协调。
 - kind/k3d full profile 跑通至少三个场景，再扩展到六场景。
 - 接入真实只读观测源和最小 OTel 关联；完成 UI 回放、SSE、响应式和无障碍门禁。
 - 目标发布层级：D2 预发布；任何安全门禁失败都 No-Go。
