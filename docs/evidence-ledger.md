@@ -17,13 +17,14 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `185 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、SQLite 审批存储恢复/原子消费、六场景 fixture evaluator、SLO 观测窗口和 Temporal durable thin slice 测试，但仍未形成固定 benchmark。
+- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `192 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、SQLite 审批存储恢复/原子消费、受控 fake Kubernetes 状态/失败注入、六场景 fixture evaluator、SLO 观测窗口和 Temporal durable thin slice 测试，但仍未形成固定 benchmark。
 - 前端门禁：Web Console `npm test -- --run` 为 `24 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
 - Python 轻量门禁：`python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有既存 import/style/type-datetime 规则问题，不能称为完整 lint 通过。
 - 本轮流程收敛：场景启动、审批后执行和 API 启动恢复均通过 `LocalExerciseWorkflow`；审批决定不再直接写入 action/recovery fixture 事件。
 - SLO 验证切片：`verify_slo_recovery` 不再固定成功，兼容 Workflow 与 Temporal Activity 都要求显式观测样本并拒绝空窗口、样本不足和超阈值；当前输入仍是 Activity 调用方提供的受控数据，未连接 Prometheus/真实观测源。
 - Temporal durable thin slice：Temporal SDK 测试服务器实际执行 `SentinelIncidentWorkflow`，覆盖审批 Signal、三类 Activity、Activity retry policy、审批过期/计划哈希校验、独立本地测试服务器上的 Worker 重启，并对完成 history replay 通过；范围仅为单场景原型，尚未覆盖 PostgreSQL projection/outbox、跨进程审批消费或六场景 full profile。
 - Action Gateway 审批持久化切片：新增 SQLite 审批记录、不可变登记、重启恢复、撤销和 SQL 条件更新原子消费；这是本地 durable backend，不等同于 full profile PostgreSQL migration/outbox 或跨服务事务。
+- Action Gateway 执行器切片：新增可替换执行器边界和受控 fake Kubernetes Deployment API，验证 restart/scale、UID/generation 漂移、ready 状态及 timeout/partial-ready/unknown；仅为隔离测试实现，不等同于真实 Kubernetes API 或 full profile。
 - 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定评测仍未完成。
 
 ## 2. Claim 台账
@@ -33,7 +34,7 @@
 | CLM-01 | 持久化事故工作流 | I/T(partial) | “单场景 `SentinelIncidentWorkflow` 已在 Temporal SDK 测试服务器执行、完成 history replay，并通过独立本地测试服务器的 Worker restart；完整多场景和投影对账仍未完成” | history refs、PostgreSQL projection/outbox、原始日志 |
 | CLM-02 | 跨指标/日志/Trace/K8s 调查 | D | “定义了四类受限诊断工具与 Evidence 引用协议” | full E2E、工具审计、Top-1 report |
 | CLM-03 | 根因 Top-1 | D | “建立了 Top-1 与 B0/B1/C1 评测协议” | holdout dataset、样本数、模型/版本、原始报告 |
-| CLM-04 | 安全审批与受控动作 | I/T(partial) | “light Alert Ingress 校验时间戳、nonce、HMAC 并拒绝同 nonce 重放；Control API 创建审批时重算 MVP policy、目标和 canonical plan hash；Action Gateway 默认 fail-closed，校验 HMAC 审批凭证、独立审批记录、目标身份、Runbook/目标/参数/hash/expiry；SQLite backend 已覆盖重启恢复和原子一次性消费；动作仍为 fixture” | PostgreSQL 绑定 approval、TokenReview、跨服务重放、真实目标 UID/generation 读取和 fake K8s 执行测试 |
+| CLM-04 | 安全审批与受控动作 | I/T(partial) | “light Alert Ingress 校验时间戳、nonce、HMAC 并拒绝同 nonce 重放；Control API 创建审批时重算 MVP policy、目标和 canonical plan hash；Action Gateway 默认 fail-closed，校验 HMAC 审批凭证、独立审批记录、目标身份、Runbook/目标/参数/hash/expiry；SQLite backend 已覆盖重启恢复和原子一次性消费；受控 fake K8s 已覆盖状态变化和失败注入；默认动作仍为 fixture” | PostgreSQL 绑定 approval、TokenReview、跨服务重放、真实目标 UID/generation 读取、full profile 接入和真实 Kubernetes 执行测试 |
 | CLM-05 | 零重复副作用 | I/T(partial) | “进程内锁覆盖同一幂等键的并发提交测试；不代表跨进程、重启或超时后的零副作用” | submit timeout/Worker restart/数据库唯一约束/并发报告 effect=0 |
 | CLM-06 | 固定攻击集拦截 | D | “定义了提示注入与越权攻击集” | 样本数、拒绝码、合法接受率、安全报告 |
 | CLM-07 | 自动/受控恢复 | D | “设计了自动恢复、restart、scale 三种可区分路径” | 因果对照、SLO observed window、recovery_actor |
