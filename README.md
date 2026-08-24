@@ -4,7 +4,7 @@ Sentinel-X 是一个面向隔离演练环境的 AI 事故指挥平台原型。�
 
 它不是普通聊天机器人，也不允许模型获得任意 Shell、`kubectl` 或生产集群写权限。
 
-> 当前状态：`D1-light` 本地原型。Control API、Action Gateway、Incident Worker、诊断工具、演练微服务和 React 控制台已经可以本地运行；完整 Kubernetes、Temporal Server replay、PostgreSQL 持久投影、全量 OpenTelemetry 和固定 benchmark 仍未完成。
+> 当前状态：`D1-light` 本地原型。Control API、Action Gateway、Incident Worker、诊断工具、演练微服务和 React 控制台已经可以本地运行；单场景 Temporal durable thin slice 已通过 SDK 测试服务器执行与 history replay，完整多场景 Kubernetes/Temporal、PostgreSQL 持久投影、全量 OpenTelemetry 和固定 benchmark 仍未完成。
 
 ## 30 秒演示
 
@@ -215,7 +215,7 @@ infra/                Kubernetes、OTel、Prometheus 等清单草案
 
 - 收敛 `/api` 与正式 `/api/v1` 契约，补齐认证、幂等、ETag 和持久投影。
 - 将审批绑定到数据库记录、目标身份、参数哈希、过期时间和一次性消费凭证。
-- 完成 Temporal Server replay、PostgreSQL migration/outbox 和 worker 重启恢复。
+- 将 Temporal durable thin slice 扩展到六场景，补齐 PostgreSQL migration/outbox 和 worker 重启恢复。
 - 在本地隔离 Kubernetes 中完成六场景注入、cleanup、权限负向测试和观测查询。
 - 发布带 dataset/profile/model/policy/SLO 版本的 holdout benchmark，不用演示数据替代评测。
 

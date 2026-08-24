@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock
 
 import pytest
-
 from sentinel_x_incident_worker.worker import WorkerRunner
 
 
@@ -27,3 +26,14 @@ async def test_full_profile_refuses_temporal_fallback():
     with pytest.raises(RuntimeError, match="禁止降级"):
         await runner.start()
 
+
+@pytest.mark.asyncio
+async def test_full_profile_runs_registered_temporal_worker():
+    runner = WorkerRunner()
+    runner.profile = "full"
+    runner._check_temporal = AsyncMock(return_value=True)
+    runner._start_temporal_worker = AsyncMock()
+
+    await runner.start()
+
+    runner._start_temporal_worker.assert_awaited_once()
