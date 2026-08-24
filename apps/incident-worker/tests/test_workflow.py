@@ -2,12 +2,12 @@
 Incident Workflow 测试 — 覆盖完整流程、预算耗尽、策略拒绝、Kill Switch。
 """
 
-import pytest
 from uuid import uuid4
 
+import pytest
+from sentinel_x_contracts import RiskLevel as ContractRiskLevel
 from sentinel_x_domain.services import compute_plan_hash
 from sentinel_x_domain.state_machine import IncidentState, IncidentStatus
-from sentinel_x_contracts import RiskLevel as ContractRiskLevel
 from sentinel_x_incident_worker.workflows import (
     HypothesisResult,
     IncidentWorkflow,
@@ -254,3 +254,35 @@ class TestEdgeCases:
         await wf.execute()
         # error_log 应始终是列表（可能为空）
         assert isinstance(fresh_ctx.error_log, list)
+
+
+@pytest.mark.asyncio
+class TestRecoveryVerification:
+    """恢复结论必须来自可审计的观测样本。"""
+
+    async def test_observed_window_over_threshold_fails_workflow(self, fresh_ctx):
+        fresh_ctx.observed_p99_samples = [150.0, 240.0]
+
+        result = await IncidentWorkflow(fresh_ctx).execute()
+
+        assert result.status == IncidentStatus.FAILED
+        assert fresh_ctx.verification_result["recovered"] is False
+        assert fresh_ctx.verification_result["failure_reason"] == "观测窗口超过 SLO 阈值"
+        assert any("观测窗口超过 SLO 阈值" in entry for entry in result.history)
+
+    async def test_empty_observed_window_fails_workflow(self, fresh_ctx):
+        fresh_ctx.observed_p99_samples = []
+
+        result = await IncidentWorkflow(fresh_ctx).execute()
+
+        assert result.status == IncidentStatus.FAILED
+        assert fresh_ctx.verification_result["failure_reason"] == "观测窗口无数据"
+
+    async def test_recovery_activity_returns_observation_record(self, fresh_ctx):
+        workflow = IncidentWorkflow(fresh_ctx)
+
+        recovered = await workflow._verify_recovery_activity()
+
+        assert recovered is True
+        assert fresh_ctx.verification_result["service"] == "inventory-api"
+        assert fresh_ctx.verification_result["sample_count"] == 2

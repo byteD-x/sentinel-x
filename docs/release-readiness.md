@@ -48,7 +48,7 @@
 - Action Gateway 已默认 fail-closed，并校验本地 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份和进程内一次性消费；仍未实现 TokenReview、数据库绑定审批读取与跨进程原子消费。
 - Alert Ingress 已校验时间戳、nonce 和 HMAC，并在 local profile 使用有界 replay cache；body 上限和正式 Alertmanager webhook 契约仍未实现。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
-- light Workflow fixture 仍包含模拟执行路径；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal 和 history replay。
+- light Workflow fixture 的动作执行仍是模拟路径，但恢复结论已改为读取受控观测样本；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal 和 history replay。
 - full 多场景 Temporal replay、Worker 重启恢复、PostgreSQL migration、projection/outbox 和 full observability E2E 未完成。
 - 默认质量门禁需持续覆盖全部真实测试目录，并保留原始输出。
 

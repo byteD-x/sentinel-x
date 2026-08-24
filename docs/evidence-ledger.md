@@ -17,11 +17,11 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `177 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、六场景 fixture evaluator、SLO 观测窗口和 Temporal durable thin slice 测试，但仍未形成固定 benchmark。
+- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `180 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、六场景 fixture evaluator、SLO 观测窗口和 Temporal durable thin slice 测试，但仍未形成固定 benchmark。
 - 前端门禁：Web Console `npm test -- --run` 为 `24 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
 - Python 轻量门禁：`python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有既存 import/style/type-datetime 规则问题，不能称为完整 lint 通过。
 - 本轮流程收敛：场景启动、审批后执行和 API 启动恢复均通过 `LocalExerciseWorkflow`；审批决定不再直接写入 action/recovery fixture 事件。
-- SLO 验证切片：`verify_slo_recovery` 不再固定成功，要求显式观测样本并拒绝空窗口、样本不足和超阈值；当前输入仍是 Activity 调用方提供的受控数据，未连接 Prometheus/真实观测源。
+- SLO 验证切片：`verify_slo_recovery` 不再固定成功，兼容 Workflow 与 Temporal Activity 都要求显式观测样本并拒绝空窗口、样本不足和超阈值；当前输入仍是 Activity 调用方提供的受控数据，未连接 Prometheus/真实观测源。
 - Temporal durable thin slice：Temporal SDK 测试服务器实际执行 `SentinelIncidentWorkflow`，覆盖审批 Signal、三类 Activity、Activity retry policy、审批过期/计划哈希校验，并对完成 history replay 通过；范围仅为单场景原型，尚未覆盖 Worker 重启、PostgreSQL projection/outbox、跨进程审批消费或六场景 full profile。
 - 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定评测仍未完成。
 
