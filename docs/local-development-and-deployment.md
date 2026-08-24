@@ -8,6 +8,7 @@
 
 - `python -m pytest ...`：运行指定 Python 测试目录。
 - `npm run build`（`apps/web-console`）：构建 React 控制台。
+- `npm test && npm run build`（`apps/terminal-console`）：验证 Ink 终端控制台契约、视图规格和类型构建。
 - `make test`：目标为快速质量门禁，需持续与根 `pytest` 收集范围保持一致。
 
 `make demo-up` / `make demo-down` 仍依赖 k3d/kind 与 full profile 资源基准，不能作为已验证演练生命周期声明。
@@ -53,6 +54,18 @@ M0 前不写死运行时版本。选择后使用 `.python-version`/锁文件、`
 | Loki / Tempo | 3100 / 3200 | 默认不公开，仅 port-forward 调试 |
 
 启动任务在端口冲突时停止并报告占用，不自动终止未知进程。CI 使用动态端口并从生成 metadata 读取。
+
+### 4.1 终端控制台
+
+`apps/terminal-console` 是复用 Control API 的只读 light/prototype 界面，不监听额外端口。控制面在 `127.0.0.1:8000` 就绪后运行：
+
+```powershell
+Set-Location apps/terminal-console
+npm ci
+npm run dev
+```
+
+非交互调用使用 `--output json`；stdout 不是 TTY 时也自动降级为 JSON。`--fields` 限制返回顶层字段，`--input` 接收与 `--describe` 一致的原始 JSON，`--dry-run` 只校验并回显请求且不连接网络。终端角色 header 仅是 local-demo 能力门控，不是生产身份。
 
 ## 5. Namespace 与故障域
 

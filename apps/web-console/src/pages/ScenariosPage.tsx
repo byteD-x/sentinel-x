@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, CheckCircle2, ClipboardCheck, FlaskConical, LoaderCircle, Play, ShieldAlert } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { apiFetch, currentRole } from '../lib/api'
-import { CATEGORY_LABELS, ROLE_LABELS, scenarioDescription, scenarioLabel, serviceLabel } from '../lib/presentation'
+import { CATEGORY_LABELS, ROLE_LABELS } from '../lib/presentation'
 import styles from './ScenariosPage.module.css'
 
 interface Scenario {
@@ -11,6 +11,8 @@ interface Scenario {
   version: number
   description: string
   category: string
+  target_service: string
+  target_namespace: string
   allowlisted_runbooks?: string[]
 }
 
@@ -18,10 +20,20 @@ interface RunResult { scenario: string; incidentId: string; status: string }
 
 const CATEGORY_CLASS: Record<string, string> = { network: styles.network, application: styles.application, database: styles.database, kubernetes: styles.kubernetes, resource: styles.resource }
 
-function targetFor(scenarioId: string) {
-  if (scenarioId.startsWith('payment')) return serviceLabel('payment-api')
-  if (scenarioId.startsWith('inventory')) return serviceLabel('inventory-api')
-  return serviceLabel('order-api')
+interface RecoveryPath {
+  summary: string
+  runbooks: string[]
+}
+
+function recoveryPathFor(allowlistedRunbooks: string[] | undefined): RecoveryPath {
+  const runbooks = allowlistedRunbooks || []
+  if (runbooks.length === 0) {
+    return { summary: '无允许的恢复操作，升级人工', runbooks }
+  }
+  if (runbooks.length === 1 && runbooks[0] === 'no_op') {
+    return { summary: '无需执行恢复动作，进入验证', runbooks }
+  }
+  return { summary: '由策略决定审批或人工升级', runbooks }
 }
 
 export function ScenariosPage() {
@@ -58,7 +70,7 @@ export function ScenariosPage() {
     try {
       const response = await apiFetch(`/api/scenarios/${selected.id}/run`, { method: 'POST' })
       const data = await response.json()
-      setRunResult({ scenario: scenarioLabel(selected.name), incidentId: data.incident_id, status: data.status })
+      setRunResult({ scenario: selected.name, incidentId: data.incident_id, status: data.status })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '启动演练失败')
     } finally {
@@ -72,6 +84,9 @@ export function ScenariosPage() {
       window.setTimeout(() => preflightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
     }
   }
+
+  const selectedRecoveryPath = selected ? recoveryPathFor(selected.allowlisted_runbooks) : null
+  const selectedActionableRunbooks = selectedRecoveryPath?.runbooks.filter(runbook => runbook !== 'no_op') || []
 
   return (
     <div className={styles.page}>
@@ -94,9 +109,9 @@ export function ScenariosPage() {
             {scenarios.map(scenario => <button key={scenario.id} type="button" className={`${styles.scenarioRow} ${scenario.id === selectedId ? styles.scenarioSelected : ''}`} onClick={() => handleSelectScenario(scenario.id)} aria-pressed={scenario.id === selectedId}>
               <span className={`${styles.categoryRail} ${CATEGORY_CLASS[scenario.category] || ''}`} aria-hidden="true" />
               <span className={styles.scenarioContent}>
-                <span className={styles.scenarioTopline}><span className={styles.scenarioName}>{scenarioLabel(scenario.name)}</span><span className={styles.category}>{CATEGORY_LABELS[scenario.category] || scenario.category}</span></span>
-                <strong>{scenarioDescription(scenario.id, scenario.description)}</strong>
-                <span className={styles.scenarioMeta}>目标：{targetFor(scenario.id)} · {scenario.allowlisted_runbooks?.[0] === 'no_op' ? '自动恢复' : '需审批'}</span>
+                <span className={styles.scenarioTopline}><span className={styles.scenarioName}>{scenario.name}</span><span className={styles.category}>{CATEGORY_LABELS[scenario.category] || scenario.category}</span></span>
+                <strong>{scenario.description}</strong>
+                <span className={styles.scenarioMeta}>目标：{scenario.target_service} · {scenario.target_namespace} · {recoveryPathFor(scenario.allowlisted_runbooks).summary}</span>
               </span>
               <ArrowRight className={styles.scenarioArrow} size={16} aria-hidden="true" />
             </button>)}
@@ -106,18 +121,20 @@ export function ScenariosPage() {
         <aside ref={preflightRef} className={styles.preflight} aria-label="演练启动条件">
           <div className={styles.sectionHeading}><div><span className={styles.sectionKicker}>2. 检查</span><h2>启动前检查</h2></div><ClipboardCheck size={19} className={styles.preflightIcon} aria-hidden="true" /></div>
           {selected ? <>
-            <p className={styles.preflightTitle}>{scenarioLabel(selected.name)}</p>
-            <p className={styles.preflightIntro}>核对影响范围和恢复条件后启动。系统会创建对应的故障记录。</p>
+            <p className={styles.preflightTitle}>{selected.name}</p>
+            <p className={styles.preflightIntro}>确认目标、命名空间和恢复路径后启动。系统会创建对应的故障记录。</p>
             <dl className={styles.preflightDetails}>
-              <div><dt>目标服务</dt><dd>{targetFor(selected.id)}</dd></div>
-              <div><dt>故障表现</dt><dd>{scenarioDescription(selected.id, selected.description)}</dd></div>
-              <div><dt>恢复方式</dt><dd>{selected.allowlisted_runbooks?.[0] === 'no_op' ? '自动恢复' : '审批后执行'}</dd></div>
+              <div><dt>目标服务</dt><dd><code>{selected.target_service}</code></dd></div>
+              <div><dt>命名空间</dt><dd><code>{selected.target_namespace}</code></dd></div>
+              <div><dt>故障表现</dt><dd>{selected.description}</dd></div>
+              <div><dt>恢复路径</dt><dd>{selectedRecoveryPath?.summary}</dd></div>
+              {selectedActionableRunbooks.length > 0 && <div><dt>允许操作</dt><dd>{selectedActionableRunbooks.map(runbook => <code key={runbook} className={styles.runbook}>{runbook}</code>)}</dd></div>}
               <div><dt>是否写入生产</dt><dd>不会，仅使用演练数据</dd></div>
             </dl>
             <div className={styles.checkList}>
               <div><CheckCircle2 size={15} aria-hidden="true" /><span>不写入生产系统</span></div>
               <div><CheckCircle2 size={15} aria-hidden="true" /><span>处理过程写入时间线</span></div>
-              <div><CheckCircle2 size={15} aria-hidden="true" /><span>恢复操作需要审批</span></div>
+              <div><CheckCircle2 size={15} aria-hidden="true" /><span>恢复操作受策略与审批门禁约束</span></div>
             </div>
             {!canRun && <div className={styles.permissionNote}><ShieldAlert size={15} aria-hidden="true" /><span>当前角色为“{ROLE_LABELS[role] || '只读'}”，无权启动演练。</span></div>}
             <button className={styles.startButton} type="button" onClick={handleRun} disabled={!canRun || runningId === selected.id}>

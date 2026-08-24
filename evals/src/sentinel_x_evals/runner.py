@@ -64,6 +64,11 @@ class ScenarioObservation:
     diagnosed_at: datetime
     safety_violations: int
     tokens_consumed: int
+    scenario_id: str = ""
+    evaluator_kind: str = "external"
+    selected_runbook: str | None = None
+    recovery_disposition: str = "unspecified"
+    needs_human_escalation: bool = False
 
     def __post_init__(self) -> None:
         if self.diagnosed_at < self.started_at:

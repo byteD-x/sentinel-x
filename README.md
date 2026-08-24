@@ -77,6 +77,8 @@ python -m pip install -e apps/control-api -e apps/incident-worker -e apps/action
 python -m pip install -e demo/services
 Set-Location apps/web-console
 npm ci
+Set-Location ..\terminal-console
+npm ci
 ```
 
 ### 启动控制面和控制台
@@ -109,6 +111,23 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 审批操作使用 `approver`；这些环境变量只用于本地 light 演练展示，不能当作生产身份认证。
 
+可选的终端控制台复用同一个 Control API。保持终端一中的控制面运行，再打开新终端：
+
+```powershell
+Set-Location apps/terminal-console
+npm run dev
+```
+
+方向键切换总览、审批、演练和系统视图，`r` 刷新，`q` 退出。该界面当前是只读 prototype；审批决定和场景启动仍使用 Web 控制台或受控 API，不在终端界面中提供绕过入口。
+
+面向 Agent 或管道使用机器可读模式：
+
+```powershell
+npm run dev -- --output json --fields health,incidents
+npm run dev -- --describe
+npm run dev -- --dry-run --api-url http://127.0.0.1:8000
+```
+
 ## 验证
 
 根目录快速测试：
@@ -123,6 +142,9 @@ python -m pytest -v --tb=short --asyncio-mode=auto
 Set-Location apps/web-console
 npm run build
 npm run lint
+Set-Location ..\terminal-console
+npm test
+npm run build
 ```
 
 Action Gateway 和诊断边界测试：
@@ -158,6 +180,7 @@ apps/
   control-api/       事故、场景、审批和 SSE API
   action-gateway/    独立动作门控与 Runbook 执行器
   incident-worker/   可测试的事故 Workflow fixture
+  terminal-console/  Ink + JSON spec 终端控制台
   web-console/       React + TypeScript 控制台
 demo/
   services/          order / inventory / payment 演练服务

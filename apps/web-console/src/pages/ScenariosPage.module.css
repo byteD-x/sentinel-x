@@ -23,11 +23,11 @@
 .categoryRail { background: #a7b5c2; }
 .network { background: #4c8dcc; }.application { background: #7b68b5; }.database { background: #c08434; }.kubernetes { background: #2f9a87; }.resource { background: #bd5967; }
 .scenarioContent { min-width: 0; display: grid; gap: 7px; padding: 15px 0; }
-.scenarioTopline { display: flex; align-items: center; gap: 9px; }
+.scenarioTopline { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
 .scenarioName { color: var(--color-text); font-size: 13px; font-weight: 720; }
 .category { padding: 3px 7px; border-radius: 4px; color: var(--color-text-muted); background: var(--color-surface-soft); font-size: 10px; }
 .scenarioContent strong { color: var(--color-text-muted); font-size: 12px; font-weight: 500; line-height: 1.5; }
-.scenarioMeta { color: var(--color-text-dim); font-size: 10px; }
+.scenarioMeta { color: var(--color-text-dim); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .scenarioArrow { align-self: center; margin-right: 12px; color: var(--color-text-dim); }
 .scenarioSelected .scenarioArrow { color: var(--color-accent); }
 .preflightIcon { color: var(--color-accent); }
@@ -35,7 +35,7 @@
 .preflightIntro { margin-top: 8px; color: var(--color-text-muted); font-size: 12px; line-height: 1.6; }
 .preflightDetails { display: grid; gap: 10px; margin-top: 20px; }
 .preflightDetails div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; padding-top: 10px; border-top: 1px solid var(--color-border); }
-.preflightDetails dt { color: var(--color-text-dim); font-size: 11px; }.preflightDetails dd { color: var(--color-text); font-size: 11px; font-weight: 650; overflow-wrap: anywhere; }
+.preflightDetails dt { color: var(--color-text-dim); font-size: 11px; }.preflightDetails dd { color: var(--color-text); font-size: 11px; font-weight: 650; overflow-wrap: anywhere; }.preflightDetails code { color: var(--color-text); font-size: 10px; }.runbook + .runbook::before { content: '、'; color: var(--color-text-dim); }
 .checkList { display: grid; gap: 8px; margin-top: 20px; }
 .checkList div { display: flex; align-items: flex-start; gap: 8px; color: var(--color-text-muted); font-size: 11px; }
 .checkList svg { flex: 0 0 auto; color: var(--color-success); }
