@@ -45,7 +45,7 @@
 当前阻塞：
 
 - Control API 与 API 契约仍有 `/api` vs `/api/v1`、认证/CSRF/HMAC/幂等/ETag 等差距。
-- Action Gateway 已默认 fail-closed，并校验本地 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份和进程内一次性消费；仍未实现 TokenReview、数据库绑定审批读取与跨进程原子消费。
+- Action Gateway 已默认 fail-closed，并校验本地 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份和一次性消费；SQLite local backend 已覆盖重启恢复与 SQL 条件更新原子消费，但仍未实现 PostgreSQL 绑定审批读取、TokenReview 和跨服务事务。
 - Alert Ingress 已校验时间戳、nonce 和 HMAC，并在 local profile 使用有界 replay cache；body 上限和正式 Alertmanager webhook 契约仍未实现。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
 - light Workflow fixture 的动作执行仍是模拟路径，但恢复结论已改为读取受控观测样本；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal、Worker restart 和 history replay。
