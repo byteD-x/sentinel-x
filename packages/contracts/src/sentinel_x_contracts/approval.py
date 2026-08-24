@@ -55,7 +55,7 @@ class ActionExecution(BaseModel):
     target: str
     parameters: dict
     risk_level: str
-    status: str = "pending"  # pending | running | succeeded | failed
+    status: str = "pending"  # pending | running | succeeded | failed | unknown
     before_state: Optional[str] = None
     after_state: Optional[str] = None
     started_at: Optional[datetime] = None
