@@ -31,23 +31,24 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - `[已完成]` `SentinelIncidentWorkflow` 已注册 Temporal Workflow/Activity，覆盖审批 Signal、Activity retry、history replay 和独立本地 Temporal Server 上的 Worker 重启恢复。
 - `[已完成]` SLO 恢复验证改为基于显式观测样本，兼容 Workflow 与 Temporal Activity 均拒绝空窗口、样本不足和超阈值。
 - `[已完成]` Action Gateway 增加可选 SQLite 审批存储，覆盖不可变登记、重启恢复、撤销和跨连接原子消费；默认 light 仍可使用内存存储。
+- `[已完成]` Action Gateway 增加可替换执行器边界和受控 fake Kubernetes Deployment API，覆盖 restart/scale、UID/generation、ready 状态及 timeout/partial-ready/unknown 失败注入；仅用于隔离测试，不连接真实集群。
 
 ### 已验证
 
-- Python 测试：`python -m pytest -q`，2026-08-25 本地 Windows 运行 **185 passed**。
+- Python 测试：`python -m pytest -q`，2026-08-25 本地 Windows 运行 **192 passed**。
 - Web Console：`npm run test -- --run` 为 **24 passed**，`npm run build`、`npm run lint` 通过。
 - Terminal Console：`npm test` 为 **7 passed**，`npm run build` 通过。
 - Web UI 合约脚本：`node scripts/ui-contract.test.mjs` 通过。
-- Action Gateway、状态机、Alert Ingress HMAC、角色门控、审批过期/篡改/幂等、本地 SQLite 快照、SQLite 审批存储、Temporal replay/restart 和 SLO 观测窗口均有测试覆盖。
+- Action Gateway、状态机、Alert Ingress HMAC、角色门控、审批过期/篡改/幂等、本地 SQLite 快照、SQLite 审批存储、受控 fake Kubernetes 状态/失败注入、Temporal replay/restart 和 SLO 观测窗口均有测试覆盖。
 
 ### 未验证或当前明确不具备
 
 - Python Ruff 轻量门禁 `python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有 236 个既存风格/类型/时区提示，不能把完整 lint 记为通过。
-- 当前 `python -m pytest -q` 可在本地 Windows 环境完成 **185 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
+- 当前 `python -m pytest -q` 可在本地 Windows 环境完成 **192 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
 - `[部分完成]` Temporal Server replay、Worker 注册、Signal/Activity retry 和 Worker 重启已在单场景 thin slice 验证；多场景 full profile、history refs 对账和 PostgreSQL projection 仍未完成。
 - `[部分完成]` Action Gateway SQLite 审批存储已支持重启恢复和跨连接原子消费；PostgreSQL migration、projection/outbox、Control API 到 Gateway 的 DB 绑定审批和跨服务事务仍未完成。
 - `[未完成]` Prometheus/Loki/Tempo/OTel full profile 查询未完成；诊断与动作仍存在模拟路径。
-- `[未完成]` Action Gateway 当前为 fixture 执行，不写真实 Kubernetes；恢复验证虽已改为受控观测样本输入，但仍未连接真实观测源。
+- `[部分完成]` Action Gateway 默认仍为 fixture 执行；受控 fake Kubernetes 仅在隔离测试中验证状态变化和失败注入，不写真实 Kubernetes，恢复验证也仍未连接真实观测源。
 - `[未完成]` 正式 `/api/v1`、会话认证、CSRF、ETag、正式幂等契约尚未收敛。
 - `[未完成]` 六场景固定 benchmark、holdout 数据集、第二个干净环境 cold run 和可发布证据包未完成。
 - `[部分完成]` 仓库已有 `.github/workflows/quality.yml`，本地门禁通过；尚未有远端 CI run 证据，产品事件埋点/漏斗数据实现仍未完成。
@@ -59,6 +60,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - Claim 等级与证据缺口： [docs/evidence-ledger.md](../docs/evidence-ledger.md:20)、[docs/evidence-ledger.md](../docs/evidence-ledger.md:28)。
 - Temporal Worker 注册与运行入口： [apps/incident-worker/src/sentinel_x_incident_worker/worker.py](../apps/incident-worker/src/sentinel_x_incident_worker/worker.py:85)；Workflow/Activity 注册与 replay 测试： [apps/incident-worker/src/sentinel_x_incident_worker/temporal_runtime.py](../apps/incident-worker/src/sentinel_x_incident_worker/temporal_runtime.py:140)。
 - 动作仍为 fixture： [apps/action-gateway/src/sentinel_x_action_gateway/app.py](../apps/action-gateway/src/sentinel_x_action_gateway/app.py:362)。
+- 受控 fake Kubernetes 执行器与状态模型： [apps/action-gateway/src/sentinel_x_action_gateway/executor.py](../apps/action-gateway/src/sentinel_x_action_gateway/executor.py:1)；覆盖测试： [apps/action-gateway/tests/test_fake_kubernetes.py](../apps/action-gateway/tests/test_fake_kubernetes.py:1)。
 - 验证路径已要求显式观测样本并覆盖空窗口/样本不足/超阈值失败： [apps/incident-worker/src/sentinel_x_incident_worker/activities.py](../apps/incident-worker/src/sentinel_x_incident_worker/activities.py:254)；真实观测源仍未接入。
 - 本地内存状态 + SQLite 快照： [apps/control-api/src/sentinel_x_control_api/app.py](../apps/control-api/src/sentinel_x_control_api/app.py:240)；Gateway SQLite 审批存储： [apps/action-gateway/src/sentinel_x_action_gateway/approval_store.py](../apps/action-gateway/src/sentinel_x_action_gateway/approval_store.py:117)。
 - 目标路线和验收项： [docs/engineering-backlog.md](../docs/engineering-backlog.md:50)。
@@ -102,7 +104,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | --- | --- | --- | --- |
 | P0 | 页面展示的证据、恢复和执行结果部分来自 fixture/模拟数据 | 用户可能把演示结果误认为真实观测结论 | 所有页面统一显示 `fixture/live/replay`、profile 和数据新鲜度；真实数据未接入时禁用“已恢复”强语义 |
 | P0 | 角色由 `X-Sentinel-Role` 本地 header 门控 | 任何能调用本地 API 的人都可能伪造角色 | light 保持 local-only 明示；full 实现服务端会话/OIDC、CSRF、职责分离和审计身份 |
-| P0 | Action Gateway 不连接真实目标，SLO 验证仅接受受控样本 | 用户无法证明动作真的改变业务状态 | 先接 fake K8s API 做真实状态变更和失败注入，再接隔离 kind/k3d；验证必须读取真实 observed window |
+| P0 | `[部分完成]` Action Gateway 已有受控 fake K8s 状态变化和失败注入，但默认不连接真实目标，SLO 验证仅接受受控样本 | 用户无法证明动作真的改变业务状态 | 先将 fake K8s 接入隔离 full profile，再接 kind/k3d；验证必须读取真实 observed window |
 | P0 | `[部分完成]` Gateway 已从独立 ApprovalStore 读取不可变记录，并校验 namespace/kind/name/UID/generation、expiry、hash；SQLite backend 已支持跨连接原子消费 | PostgreSQL 权威审批、TokenReview/mTLS、跨服务事务和真实目标状态仍未完成 | 接入 PostgreSQL 专用 DB role、服务身份校验和真实目标 UID/generation 读取 |
 | P1 | 事故回放目前主要是内存/SQLite 快照，导出包和持久 SSE 仍未完成 | 刷新、重启、复盘和跨人协作可信度不足 | PostgreSQL timeline/outbox + SSE gap/reconnect + 脱敏事故包 hash |
 | P1 | `[部分完成]` LocalExerciseWorkflow 已将审批决定与 action/recovery 推进分离，SLO 验证要求观测样本；真实审批投影仍未完全接入 | fixture 或受控样本不能证明业务真实恢复 | 终态只能由 Gateway 执行结果协调和真实 SLO VerificationResult 推进，动作成功与恢复成功分离 |
@@ -166,12 +168,12 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 #### P0-3：建立真实但安全的执行验证链（2 周）`[部分完成]`
 
-- `[未完成]` Action Gateway 先接 fake K8s API，模拟 Deployment UID/generation、patch、timeout、partial ready 和状态未知。
+- `[已完成]` 已实现受控 fake K8s API，模拟 Deployment UID/generation、restart/scale、timeout、partial ready 和状态未知，并通过 Gateway 执行器记录 before/after/status。
 - `[部分完成]` 审批已绑定独立记录、目标身份、参数 hash、expiry 和一次性消费；SQLite 已验证重启/跨连接消费，PostgreSQL 和 policy/runbook version 绑定仍缺失。
 - Gateway 重新读取批准记录并校验 namespace/kind/name/UID/generation；Control API 的审批创建端也必须服务器端重算 policy 与 canonical plan hash。
 - 保持 kill switch 默认开启；在所有负向测试通过前不开放 full R1。
 
-验证：`[部分完成]` 合法 restart/scale、过期、撤销、参数改写、目标身份、幂等和 R2/R3 拒绝已有 light 测试；`[未完成]` fake K8s 状态变化、timeout/reconcile、跨 namespace/Secrets/exec 攻击集和真实 effect count 证据。
+验证：`[部分完成]` 合法 restart/scale、fake K8s 状态变化、UID/generation 漂移、timeout/partial-ready/unknown、过期、撤销、参数改写、幂等和 R2/R3 拒绝已有测试；`[未完成]` fake K8s full profile 接入、timeout/reconcile、跨 namespace/Secrets/exec 攻击集和真实 effect count 证据。
 
 ### P1：补齐可用的 full Demo MVP
 
@@ -214,6 +216,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - `[已完成]` 关闭 P0-1 本地门禁：CI、轻量 Ruff、统一 test/lint/build、敏感信息扫描；远端 CI run 证据仍待补充。
 - `[部分完成]` 完成 Temporal spike、Workflow 注册、replay、Signal 和 Worker restart；PostgreSQL migration/outbox 仍未完成。
 - `[已完成]` 交付单场景 durable thin slice，R1 仍默认关闭真实写动作。
+- `[已完成]` 增加受控 fake Kubernetes 执行器切片，真实集群写动作仍默认关闭。
 - `[部分完成]` 产出证据账本和 D1 基线记录；正式 evidence manifest、原始报告 hash 和发布包仍未完成。
 
 ### 31–60 天：完整 Demo MVP（下一阶段）
