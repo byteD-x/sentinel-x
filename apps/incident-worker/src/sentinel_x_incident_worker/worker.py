@@ -14,7 +14,6 @@ import asyncio
 import logging
 import os
 import signal
-import sys
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,13 +35,15 @@ class WorkerRunner:
     Worker 运行器。
 
     `light` profile 只运行本地 Workflow fixture。
-    `full` profile 不能降级：当前尚未实现真实 Temporal Worker 注册，因此必须拒绝启动。
+    `full` profile 连接 Temporal Server 并注册 durable Workflow/Activities。
     """
 
     def __init__(self):
         self._running = False
         self._shutdown_event = asyncio.Event()
         self.profile = os.getenv("SENTINEL_PROFILE", "light")
+        self._worker = None
+        self._client = None
 
     async def start(self) -> None:
         """启动 Worker。"""
@@ -79,23 +80,38 @@ class WorkerRunner:
             # 尝试获取 server 信息
             await client.system.get_server_info()
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001 - Temporal SDK 连接错误类型不稳定，必须 fail closed
             return False
 
     async def _start_temporal_worker(self) -> None:
-        """拒绝运行尚未注册 Workflow/Activity 的伪 Temporal Worker。"""
-        raise RuntimeError(
-            "full profile Temporal Worker 注册尚未实现；"
-            "不得以空循环替代持久化 Workflow 执行"
+        """连接 Temporal 并运行真实 Worker。"""
+        from temporalio.client import Client
+
+        from sentinel_x_incident_worker.temporal_runtime import build_temporal_worker
+
+        self._client = await Client.connect(
+            TEMPORAL_CONFIG["address"],
+            namespace=TEMPORAL_CONFIG["namespace"],
         )
+        self._worker = build_temporal_worker(
+            self._client,
+            task_queue=TEMPORAL_CONFIG["task_queue"],
+        )
+        logger.info(
+            "Temporal Worker 已注册: workflow=SentinelIncidentWorkflow, "
+            "activities=3, task_queue=%s",
+            TEMPORAL_CONFIG["task_queue"],
+        )
+        await self._worker.run()
 
     async def _start_local_mode(self) -> None:
         """本地模式：直接运行 Workflow 进行测试。"""
+        from sentinel_x_domain.state_machine import IncidentState
+
         from sentinel_x_incident_worker.workflows import (
             IncidentWorkflow,
             WorkflowContext,
         )
-        from sentinel_x_domain.state_machine import IncidentState
 
         logger.info("本地模式：运行测试 Workflow...")
 
@@ -114,6 +130,8 @@ class WorkerRunner:
         """优雅关闭。"""
         logger.info("Worker 正在关闭...")
         self._running = False
+        if self._worker is not None:
+            await self._worker.shutdown()
         self._shutdown_event.set()
 
 
