@@ -22,7 +22,10 @@ import hmac
 import json
 import os
 import random
+import threading
+import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -56,6 +59,8 @@ from sentinel_x_control_api.eval_archive import (
     get_evaluation_archive,
     list_evaluation_archives,
 )
+from sentinel_x_control_api.local_state import LocalStateSnapshot
+from sentinel_x_control_api.local_workflow import LocalExerciseWorkflow
 
 
 EVAL_ARCHIVE_DIR = Path(os.getenv("SENTINEL_EVAL_ARCHIVE_DIR", "evals/results"))
@@ -213,11 +218,8 @@ class HealthResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 内存存储 — MVP 阶段替代 PostgreSQL
-# 正式开发时替换为 SQLAlchemy + PostgreSQL
+# 本地状态存储。SQLite 快照只服务 local-isolated profile，不能替代 PostgreSQL 投影。
 # ---------------------------------------------------------------------------
-
-from dataclasses import dataclass, field
 
 
 @dataclass
@@ -238,12 +240,116 @@ class StoredIncident:
 
 
 class InMemoryStore:
-    """线程安全的内存存储。"""
+    """本地读模型缓存，可选用 SQLite 快照跨进程恢复。"""
 
-    def __init__(self):
+    def __init__(self, state_path: str | Path | None = None):
         self._incidents: dict[str, StoredIncident] = {}
         self._fingerprint_index: dict[str, str] = {}
         self._approvals: dict[str, dict] = {}
+        self._workflow_checkpoints: dict[str, dict] = {}
+        self._state_snapshot = LocalStateSnapshot(state_path) if state_path else None
+        if self._state_snapshot:
+            self._restore()
+
+    def reset(self) -> None:
+        """清空本地状态，供隔离测试和明确的本地重置流程使用。"""
+        self._incidents.clear()
+        self._fingerprint_index.clear()
+        self._approvals.clear()
+        self._workflow_checkpoints.clear()
+        if self._state_snapshot:
+            self._state_snapshot.clear()
+
+    def flush(self) -> None:
+        """把由 fixture 直接修改的对象同步到本地快照。"""
+        if self._state_snapshot:
+            self._state_snapshot.save(self._snapshot_payload())
+
+    def _snapshot_payload(self) -> dict:
+        return {
+            "schema_version": 1,
+            "incidents": [
+                {
+                    "id": incident.id,
+                    "fingerprint": incident.fingerprint,
+                    "status": incident.status.value,
+                    "severity": incident.severity.value,
+                    "alert_name": incident.alert_name,
+                    "description": incident.description,
+                    "created_at": incident.created_at.isoformat(),
+                    "updated_at": incident.updated_at.isoformat(),
+                    "resolved_at": (
+                        incident.resolved_at.isoformat() if incident.resolved_at else None
+                    ),
+                    "workflow_id": incident.workflow_id,
+                    "version": incident.version,
+                    "timeline": [
+                        event.model_dump(mode="json") for event in incident.timeline
+                    ],
+                }
+                for incident in self._incidents.values()
+            ],
+            "approvals": list(self._approvals.values()),
+            "workflow_checkpoints": list(self._workflow_checkpoints.values()),
+        }
+
+    def _restore(self) -> None:
+        assert self._state_snapshot is not None
+        payload = self._state_snapshot.load()
+        if payload is None:
+            return
+        if payload.get("schema_version") != 1:
+            raise ValueError("本地状态快照版本不受支持")
+        incidents = payload.get("incidents")
+        approvals = payload.get("approvals")
+        checkpoints = payload.get("workflow_checkpoints", [])
+        if not all(isinstance(value, list) for value in (incidents, approvals, checkpoints)):
+            raise ValueError("本地状态快照结构无效")
+        for raw in incidents:
+            if not isinstance(raw, dict):
+                raise ValueError("本地状态快照包含无效事故")
+            timeline = raw.get("timeline", [])
+            if not isinstance(timeline, list):
+                raise ValueError("本地状态快照包含无效时间线")
+            incident = StoredIncident(
+                id=str(raw["id"]),
+                fingerprint=str(raw["fingerprint"]),
+                status=IncidentStatus(raw["status"]),
+                severity=IncidentSeverity(raw["severity"]),
+                alert_name=str(raw["alert_name"]),
+                description=str(raw["description"]),
+                created_at=datetime.fromisoformat(str(raw["created_at"])),
+                updated_at=datetime.fromisoformat(str(raw["updated_at"])),
+                resolved_at=(
+                    datetime.fromisoformat(str(raw["resolved_at"]))
+                    if raw.get("resolved_at")
+                    else None
+                ),
+                workflow_id=raw.get("workflow_id"),
+                version=int(raw["version"]),
+                timeline=[TimelineEvent.model_validate(event) for event in timeline],
+                _timeline_seq=max(
+                    (int(event.get("sequence", 0)) for event in timeline if isinstance(event, dict)),
+                    default=0,
+                ),
+            )
+            self._incidents[incident.id] = incident
+            self._fingerprint_index[incident.fingerprint] = incident.id
+        for approval in approvals:
+            if not isinstance(approval, dict) or not isinstance(approval.get("id"), str):
+                raise ValueError("本地状态快照包含无效审批")
+            self._approvals[approval["id"]] = approval
+        orphan_checkpoint_found = False
+        for checkpoint in checkpoints:
+            incident_id = checkpoint.get("incident_id") if isinstance(checkpoint, dict) else None
+            if not isinstance(incident_id, str) or incident_id not in self._incidents:
+                orphan_checkpoint_found = True
+                continue
+            self._workflow_checkpoints[incident_id] = checkpoint
+        if orphan_checkpoint_found:
+            # 测试 reset 或旧版本可能留下孤立 checkpoint；它没有可恢复的事故，
+            # 启动时安全丢弃并写回干净快照，避免阻塞 local profile 冷启动。
+            self.flush()
 
     def create_incident(self, data: IncidentCreate) -> StoredIncident:
         existing_id = self._fingerprint_index.get(data.alert_source.fingerprint)
@@ -269,6 +375,7 @@ class InMemoryStore:
         )
         self._incidents[incident_id] = incident
         self._fingerprint_index[data.alert_source.fingerprint] = incident_id
+        self.flush()
         return incident
 
     def find_by_fingerprint(self, fingerprint: str) -> Optional[StoredIncident]:
@@ -330,7 +437,9 @@ class InMemoryStore:
         incident = self._incidents.get(incident_id)
         if not incident:
             return None
-        return self._add_timeline_event(incident, event_type, actor, payload)
+        event = self._add_timeline_event(incident, event_type, actor, payload)
+        self.flush()
+        return event
 
     def set_status(
         self,
@@ -371,6 +480,7 @@ class InMemoryStore:
             actor,
             {"from": old_status.value, "to": new_status.value, "reason": reason},
         )
+        self.flush()
 
     def get_timeline(
         self,
@@ -382,6 +492,79 @@ class InMemoryStore:
             return []
         return [e for e in incident.timeline if e.sequence > after_sequence]
 
+    def list_approvals(self, incident_id: Optional[str] = None) -> list[dict]:
+        """按创建顺序返回审批，不向调用方暴露内部可变映射。"""
+        approvals = list(self._approvals.values())
+        if incident_id is not None:
+            approvals = [
+                approval for approval in approvals if approval["incident_id"] == incident_id
+            ]
+        return sorted(approvals, key=lambda approval: approval["created_at"])
+
+    def create_workflow_checkpoint(
+        self,
+        incident_id: str,
+        scenario_id: str,
+        phase: str,
+    ) -> dict:
+        """创建或返回本地可恢复工作流的唯一检查点。"""
+        incident = self._incidents.get(incident_id)
+        if not incident:
+            raise ValueError("事故不存在")
+        existing = self._workflow_checkpoints.get(incident_id)
+        if existing:
+            if existing["scenario_id"] != scenario_id:
+                raise ValueError("同一事故不能绑定多个场景工作流")
+            return dict(existing)
+        checkpoint = {
+            "workflow_id": f"incident/{incident_id}",
+            "incident_id": incident_id,
+            "scenario_id": scenario_id,
+            "phase": phase,
+            "action_execution_id": None,
+            "completed": False,
+            "updated_at": datetime.now().isoformat(),
+        }
+        incident.workflow_id = checkpoint["workflow_id"]
+        incident.updated_at = datetime.now()
+        incident.version += 1
+        self._workflow_checkpoints[incident_id] = checkpoint
+        self.flush()
+        return dict(checkpoint)
+
+    def get_workflow_checkpoint(self, incident_id: str) -> Optional[dict]:
+        checkpoint = self._workflow_checkpoints.get(incident_id)
+        return dict(checkpoint) if checkpoint else None
+
+    def update_workflow_checkpoint(
+        self,
+        incident_id: str,
+        *,
+        phase: Optional[str] = None,
+        action_execution_id: Optional[str] = None,
+        completed: Optional[bool] = None,
+    ) -> dict:
+        """持久化本地编排进度；只保存恢复所需的引用。"""
+        checkpoint = self._workflow_checkpoints.get(incident_id)
+        if not checkpoint:
+            raise ValueError("工作流检查点不存在")
+        if phase is not None:
+            checkpoint["phase"] = phase
+        if action_execution_id is not None:
+            checkpoint["action_execution_id"] = action_execution_id
+        if completed is not None:
+            checkpoint["completed"] = completed
+        checkpoint["updated_at"] = datetime.now().isoformat()
+        self.flush()
+        return dict(checkpoint)
+
+    def list_resumable_workflow_checkpoints(self) -> list[dict]:
+        return [
+            dict(checkpoint)
+            for checkpoint in self._workflow_checkpoints.values()
+            if not checkpoint["completed"]
+        ]
+
     def create_approval(
         self,
         incident_id: str,
@@ -391,6 +574,19 @@ class InMemoryStore:
         incident = self._incidents.get(incident_id)
         if not incident:
             raise ValueError("事故不存在")
+        policy = check_mvp_policy(data.runbook_ref, data.target)
+        if not policy.allowed:
+            raise ValueError(policy.reason)
+        if data.risk_level != policy.risk_level:
+            raise ValueError("审批风险等级与登记的 Runbook 不一致")
+        expected_plan_hash = compute_plan_hash(
+            data.runbook_ref,
+            data.target,
+            data.parameters,
+            incident_id,
+        )
+        if data.plan_hash != expected_plan_hash:
+            raise ValueError("审批 plan hash 与规范化计划不一致")
         if incident.status == IncidentStatus.DETECTED:
             self.set_status(incident, IncidentStatus.TRIAGING, "进入审批前检查")
             self.set_status(incident, IncidentStatus.DIAGNOSING, "完成基础诊断")
@@ -421,6 +617,7 @@ class InMemoryStore:
         }
         self._approvals[approval_id] = approval
         self.add_timeline_event(incident_id, "approval.requested", "system", approval)
+        self.flush()
         return approval
 
     def decide_approval(
@@ -441,6 +638,7 @@ class InMemoryStore:
         expires_at = datetime.fromisoformat(approval["expires_at"])
         if datetime.now() > expires_at:
             approval["status"] = "expired"
+            self.flush()
             return approval
         incident = self._incidents.get(approval["incident_id"])
         if not incident or incident.status != IncidentStatus.AWAITING_APPROVAL:
@@ -455,43 +653,9 @@ class InMemoryStore:
             {"approved": decision.approved, "reason": decision.reason},
         )
 
-        if incident:
-            if decision.approved:
-                self.set_status(incident, IncidentStatus.EXECUTING, "人工批准 R1 动作")
-                self._add_timeline_event(
-                    incident,
-                    "action.started",
-                    "action_gateway_fixture",
-                    {
-                        "runbook_ref": approval["runbook_ref"],
-                        "target": approval["target"],
-                        "mode": "light-fixture",
-                    },
-                )
-                self.set_status(incident, IncidentStatus.VERIFYING, "动作完成，开始检查恢复")
-                self._add_timeline_event(
-                    incident,
-                    "action.completed",
-                    "action_gateway_fixture",
-                    {"status": "succeeded", "before_state": "degraded", "after_state": "healthy"},
-                )
-                self.set_status(incident, IncidentStatus.RESOLVED, "恢复窗口验证通过")
-                incident.resolved_at = incident.resolved_at or datetime.now()
-                self._add_timeline_event(
-                    incident,
-                    "recovery.verified",
-                    "verification_fixture",
-                    {"result": "passed", "window_seconds": 60},
-                )
-            else:
-                if incident.status not in {IncidentStatus.RESOLVED, IncidentStatus.ESCALATED, IncidentStatus.FAILED}:
-                    self.set_status(incident, IncidentStatus.ESCALATED, "人工拒绝恢复动作")
-                self._add_timeline_event(
-                    incident,
-                    "incident.escalated",
-                    "system",
-                    {"reason": decision.reason},
-                )
+        # 审批决定只记录不可变用户意图；动作、验证和终态由编排器推进。
+        # 这样 API 不会绕过 LocalExerciseWorkflow/未来 Temporal 的执行边界。
+        self.flush()
         return approval
 
 # ---------------------------------------------------------------------------
@@ -499,9 +663,15 @@ class InMemoryStore:
 # ---------------------------------------------------------------------------
 
 
-store = InMemoryStore()
+LOCAL_STATE_PATH = Path(os.getenv("SENTINEL_LOCAL_STATE_DB", ".local/data/control-api.sqlite3"))
+store = InMemoryStore(state_path=LOCAL_STATE_PATH)
+local_workflow = LocalExerciseWorkflow(store, scenarios_dir=SCENARIOS_DIR)
 ALERT_INGRESS_HMAC_KEY = os.getenv("ALERT_INGRESS_HMAC_KEY")
 ALERT_INGRESS_CLOCK_SKEW_SECONDS = 300
+ALERT_INGRESS_REPLAY_TTL_SECONDS = int(os.getenv("ALERT_INGRESS_REPLAY_TTL_SECONDS", "300"))
+ALERT_INGRESS_REPLAY_MAX_ENTRIES = int(os.getenv("ALERT_INGRESS_REPLAY_MAX_ENTRIES", "10000"))
+_ALERT_INGRESS_REPLAY_CACHE: dict[str, float] = {}
+_ALERT_INGRESS_REPLAY_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -512,9 +682,8 @@ ALERT_INGRESS_CLOCK_SKEW_SECONDS = 300
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期。"""
-    # 启动时
+    local_workflow.resume_all()
     yield
-    # 关闭时
 
 
 app = FastAPI(
@@ -546,7 +715,7 @@ def _require_role(role: Optional[str], *allowed_roles: str) -> str:
 
 
 async def _verify_alert_ingress(request: Request) -> None:
-    """light 环境也不接受无签名告警；演练场景使用内部调用而非该入口。"""
+    """校验签名并拒绝 nonce 重放；演练场景使用内部调用而非该入口。"""
     if not ALERT_INGRESS_HMAC_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -554,8 +723,11 @@ async def _verify_alert_ingress(request: Request) -> None:
         )
     timestamp = request.headers.get("X-Sentinel-Timestamp")
     signature = request.headers.get("X-Sentinel-Signature")
+    nonce = request.headers.get("X-Sentinel-Nonce")
     if not timestamp or not signature or not signature.startswith("sha256="):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 签名缺失")
+    if not nonce or len(nonce) > 128:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress nonce 缺失或非法")
     try:
         timestamp_value = int(timestamp)
     except ValueError as exc:
@@ -565,11 +737,27 @@ async def _verify_alert_ingress(request: Request) -> None:
     raw_body = await request.body()
     expected = hmac.new(
         ALERT_INGRESS_HMAC_KEY.encode("utf-8"),
-        timestamp.encode("utf-8") + b"\n" + raw_body,
+        timestamp.encode("utf-8") + b"\n" + nonce.encode("utf-8") + b"\n" + raw_body,
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(signature[7:], expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 签名无效")
+
+    now = time.time()
+    with _ALERT_INGRESS_REPLAY_LOCK:
+        expired = [
+            cached_nonce
+            for cached_nonce, seen_at in _ALERT_INGRESS_REPLAY_CACHE.items()
+            if now - seen_at > ALERT_INGRESS_REPLAY_TTL_SECONDS
+        ]
+        for cached_nonce in expired:
+            _ALERT_INGRESS_REPLAY_CACHE.pop(cached_nonce, None)
+        if nonce in _ALERT_INGRESS_REPLAY_CACHE:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 请求已重放")
+        _ALERT_INGRESS_REPLAY_CACHE[nonce] = now
+        if len(_ALERT_INGRESS_REPLAY_CACHE) > ALERT_INGRESS_REPLAY_MAX_ENTRIES:
+            oldest_nonce = min(_ALERT_INGRESS_REPLAY_CACHE, key=_ALERT_INGRESS_REPLAY_CACHE.get)
+            _ALERT_INGRESS_REPLAY_CACHE.pop(oldest_nonce, None)
 
 
 _PHASE_ORDER = [
@@ -768,6 +956,7 @@ def _next_decision(incident: StoredIncident, approval: Optional[dict]) -> NextDe
         IncidentStatus.TRIAGING: ("investigate", "确认故障范围", "正在收集初始信号。"),
         IncidentStatus.DIAGNOSING: ("investigate", "等待调查结论", "正在关联调查证据。"),
         IncidentStatus.PLAN_PROPOSED: ("investigate", "核对恢复方案", "恢复方案尚未提交审批。"),
+        IncidentStatus.AWAITING_APPROVAL: ("review_approval", "核对恢复操作", "恢复操作等待审批流程继续。"),
         IncidentStatus.EXECUTING: ("wait_execution", "等待操作完成", "恢复操作正在执行。"),
         IncidentStatus.VERIFYING: (
             "review_verification",
@@ -987,6 +1176,7 @@ async def decide_approval(
     result = store.decide_approval(approval_id, decision, decided_by=decided_by, incident_id=incident_id)
     if not result:
         raise HTTPException(status_code=404, detail=f"审批 {approval_id} 不存在或已决定")
+    local_workflow.resume(incident_id)
     return result
 
 
@@ -1065,7 +1255,6 @@ async def run_scenario(
 
     primary_fault = scenario.faults[0]
     target = primary_fault.target_service
-    target_namespace = primary_fault.target_namespace
     severity = (
         IncidentSeverity.CRITICAL
         if scenario.category.value in {"database", "kubernetes", "resource"}
@@ -1091,99 +1280,7 @@ async def run_scenario(
             )
         )
     )
-    store.add_timeline_event(
-        incident.id,
-        "scenario.started",
-        "scenario_runner",
-        {
-            "scenario_id": scenario_id,
-            "profile": "light",
-            "target": target,
-            "target_namespace": target_namespace,
-        },
-    )
-    store.set_status(incident, IncidentStatus.TRIAGING, "故障注入已确认")
-    store.set_status(incident, IncidentStatus.DIAGNOSING, "Agent 开始关联诊断信号")
-
-    evidence = [
-        f"Prometheus: {target} 指标偏离基线",
-        f"Loki: {target} 故障日志已归档",
-        f"Tempo: {target} 依赖调用链异常",
-    ]
-    for index, summary in enumerate(evidence, start=1):
-        store.add_timeline_event(
-            incident.id,
-            "evidence.collected",
-            "diagnostic_gateway",
-            {
-                "source": ["prometheus", "loki", "tempo"][index % 3],
-                "summary": summary,
-                "evidence_id": f"ev-{incident.id[:8]}-{index}",
-            },
-        )
-    store.add_timeline_event(
-        incident.id,
-        "hypothesis.generated",
-        "investigator_fixture",
-        {
-            "statement": scenario.name + " 与目标服务异常信号一致",
-            "confidence": 0.88,
-            "category": scenario.category.value,
-            "affected_service": target,
-            "supporting_evidence": len(evidence),
-            "opposing_evidence": "payment-api / PostgreSQL 基线正常",
-        },
-    )
-
-    allowed_runbooks = list(scenario.allowlisted_runbooks)
-    runbook_ref = allowed_runbooks[0] if allowed_runbooks else "no_op"
-
-    if not allowed_runbooks:
-        store.set_status(incident, IncidentStatus.ESCALATED, "没有允许的自动恢复动作，升级人工")
-        store.add_timeline_event(
-            incident.id,
-            "incident.escalated",
-            "policy_gate",
-            {"reason": "没有允许的自动恢复动作", "runbook_ref": None},
-        )
-    elif runbook_ref == "no_op":
-        store.set_status(incident, IncidentStatus.VERIFYING, "观察自动恢复")
-        store.add_timeline_event(
-            incident.id,
-            "recovery.verified",
-            "verification_fixture",
-            {"result": "passed", "action": "none", "window_seconds": 60},
-        )
-        store.set_status(incident, IncidentStatus.RESOLVED, "自动恢复验证通过")
-        incident.resolved_at = datetime.now()
-    else:
-        store.set_status(incident, IncidentStatus.PLAN_PROPOSED, "形成受限恢复方案")
-        decision = check_mvp_policy(runbook_ref, target)
-        if not decision.allowed:
-            store.set_status(incident, IncidentStatus.ESCALATED, decision.reason)
-            store.add_timeline_event(
-                incident.id,
-                "incident.escalated",
-                "policy_gate",
-                {"reason": decision.reason, "runbook_ref": runbook_ref},
-            )
-        else:
-            parameters = {"reason": f"修复 {scenario_id} 的演练故障"}
-            if runbook_ref == "scale_deployment@1":
-                parameters["replicas"] = 3
-            store.set_status(incident, IncidentStatus.AWAITING_APPROVAL, "等待人工批准 R1 动作")
-            store.create_approval(
-                incident.id,
-                ApprovalRequest(
-                    plan_id=f"plan-{incident.id[:8]}",
-                    runbook_ref=runbook_ref,
-                    target=target,
-                    parameters=parameters,
-                    risk_level=decision.risk_level,
-                    plan_hash=compute_plan_hash(runbook_ref, target, parameters, incident.id),
-                    hypothesis_id=f"hyp-{incident.id[:8]}",
-                ),
-            )
+    local_workflow.start(incident.id, scenario)
 
     return {
         "exercise_id": str(uuid4()),

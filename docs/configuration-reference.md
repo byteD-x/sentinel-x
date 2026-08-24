@@ -4,7 +4,7 @@
 
 本文是配置名称、来源、默认、安全性、校验和 profile 差异的唯一人工可读来源。`.env.example` 只提供无秘密模板，不重复解释语义。
 
-当前没有配置加载代码；所有名称为 `proposed`，代码骨架落地后由 Pydantic Settings/等价类型化配置和测试成为执行事实。
+终端控制台已类型化解析 `SENTINEL_API_URL` 和 `SENTINEL_ROLE`；其余尚未接入代码的名称仍为 `proposed`，后续由 Pydantic Settings/等价类型化配置和测试成为执行事实。
 
 ## 2. 配置优先级
 
@@ -55,8 +55,14 @@
 | `CONTROL_API_HOST` | `127.0.0.1` | 否 | 本地默认不监听所有网卡 |
 | `CONTROL_API_PORT` | `8000` | 否 | 1–65535，启动时端口冲突检查 |
 | `WEB_CONSOLE_PORT` | `5173` | 否 | 开发端口，发布构建由 API/静态服务托管策略决定 |
+| `SENTINEL_API_URL` | `http://127.0.0.1:8000` | 否 | 终端控制台基址；仅允许无路径、query 和 fragment 的 HTTP(S) URL |
+| `SENTINEL_ROLE` | `viewer` | 否 | 终端 local-demo 角色；enum，不能视为生产身份认证 |
+| `SENTINEL_EVAL_ARCHIVE_DIR` | `evals/results` | 否 | Control API 仅从该服务端固定目录读取脱敏评测归档；不接受客户端指定路径 |
+| `SENTINEL_EVAL_ARCHIVE_MAX_BYTES` | `2097152` | 否 | 单份评测归档的读取上限（字节）；超限报告不返回内容 |
 | `LOCAL_SESSION_SIGNING_KEY` | full 必填 | 是 | 最少 32 随机字节；不写日志/报告 |
 | `ALERT_INGRESS_HMAC_KEY` | full 必填 | 是 | 与 session key 独立；支持轮换双 key 窗口 |
+| `ALERT_INGRESS_REPLAY_TTL_SECONDS` | `300` | 否 | 30–3600；nonce 重放缓存保留时间 |
+| `ALERT_INGRESS_REPLAY_MAX_ENTRIES` | `10000` | 否 | 100–100000；local profile 的有界重放缓存容量 |
 | `LOCAL_SESSION_TTL_MINUTES` | 目标 60 | 否 | 5–480；实现后加入模板 |
 | `ALERT_MAX_CLOCK_SKEW_SECONDS` | 目标 300 | 否 | 30–600；实现后加入模板 |
 

@@ -84,6 +84,9 @@ def reset_store(monkeypatch):
     control_module.store._incidents.clear()
     control_module.store._fingerprint_index.clear()
     control_module.store._approvals.clear()
+    control_module.store._workflow_checkpoints.clear()
+    control_module.store.flush()
+    control_module._ALERT_INGRESS_REPLAY_CACHE.clear()
     monkeypatch.setattr(control_module, "ALERT_INGRESS_HMAC_KEY", "test-alert-ingress-secret")
 
 
@@ -95,12 +98,14 @@ async def client():
         if "X-Sentinel-Signature" in request.headers:
             return
         timestamp = str(int(time.time()))
+        nonce = str(time.time_ns())
         signature = hmac.new(
             b"test-alert-ingress-secret",
-            timestamp.encode() + b"\n" + request.content,
+            timestamp.encode() + b"\n" + nonce.encode() + b"\n" + request.content,
             hashlib.sha256,
         ).hexdigest()
         request.headers["X-Sentinel-Timestamp"] = timestamp
+        request.headers["X-Sentinel-Nonce"] = nonce
         request.headers["X-Sentinel-Signature"] = f"sha256={signature}"
 
     async with AsyncClient(
@@ -359,6 +364,7 @@ class TestIncidents:
             "/api/incidents",
             headers={
                 "X-Sentinel-Timestamp": str(int(time.time())),
+                "X-Sentinel-Nonce": "invalid-signature-nonce",
                 "X-Sentinel-Signature": "sha256=invalid",
             },
             json={
@@ -374,6 +380,37 @@ class TestIncidents:
         )
         assert response.status_code == 401
         assert "签名无效" in response.json()["detail"]
+
+    async def test_alert_ingress_rejects_replayed_nonce(self, client):
+        payload = {
+            "alert_source": {
+                "alertmanager_id": "replay-test",
+                "fingerprint": "fp-replay",
+                "alert_name": "Replay Test",
+                "severity": "warning",
+                "description": "replayed alert",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        }
+        timestamp = str(int(time.time()))
+        nonce = "replay-nonce"
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        signature = hmac.new(
+            b"test-alert-ingress-secret",
+            timestamp.encode() + b"\n" + nonce.encode() + b"\n" + body,
+            hashlib.sha256,
+        ).hexdigest()
+        headers = {
+            "Content-Type": "application/json",
+            "X-Sentinel-Timestamp": timestamp,
+            "X-Sentinel-Nonce": nonce,
+            "X-Sentinel-Signature": f"sha256={signature}",
+        }
+        first = await client.post("/api/incidents", headers=headers, content=body)
+        second = await client.post("/api/incidents", headers=headers, content=body)
+        assert first.status_code == 201
+        assert second.status_code == 401
+        assert "重放" in second.json()["detail"]
 
     async def test_alert_ingress_fails_closed_without_secret(self, client, monkeypatch):
         monkeypatch.setattr(control_module, "ALERT_INGRESS_HMAC_KEY", None)
@@ -481,7 +518,7 @@ class TestApprovals:
             "target": "payment-api",
             "parameters": {},
             "risk_level": "R1",
-            "plan_hash": "abc123",
+            "plan_hash": compute_plan_hash("restart_deployment@1", "payment-api", {}, incident_id),
             "hypothesis_id": "hyp-001",
         })
         assert response.status_code == 201
@@ -507,7 +544,7 @@ class TestApprovals:
             "target": "inventory-api",
             "parameters": {"replicas": 5},
             "risk_level": "R1",
-            "plan_hash": "def456",
+            "plan_hash": compute_plan_hash("scale_deployment@1", "inventory-api", {"replicas": 5}, incident_id),
             "hypothesis_id": "hyp-002",
         })
         approval_id = approval_resp.json()["id"]
@@ -542,7 +579,7 @@ class TestApprovals:
                 "target": "payment-api",
                 "parameters": {},
                 "risk_level": "R1",
-                "plan_hash": "rolehash",
+                "plan_hash": compute_plan_hash("restart_deployment@1", "payment-api", {}, incident_id),
                 "hypothesis_id": "hyp-role",
             },
         )
@@ -552,6 +589,65 @@ class TestApprovals:
             json={"approved": True, "reason": "证据充分"},
         )
         assert denied.status_code == 403
+
+    async def test_approval_rejects_plan_hash_tampering(self, client):
+        create_resp = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "test-hash-tamper",
+                "fingerprint": "fp-hash-tamper",
+                "alert_name": "Hash Tamper Test",
+                "severity": "warning",
+                "description": "Test",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        })
+        incident_id = create_resp.json()["id"]
+        response = await client.post(
+            f"/api/incidents/{incident_id}/approvals",
+            headers=self.planner_headers,
+            json={
+                "plan_id": "plan-hash-tamper",
+                "runbook_ref": "restart_deployment@1",
+                "target": "payment-api",
+                "parameters": {},
+                "risk_level": "R1",
+                "plan_hash": "tampered-plan-hash-0000",
+                "hypothesis_id": "hyp-hash-tamper",
+            },
+        )
+        assert response.status_code == 409
+        assert "plan hash" in response.json()["detail"]
+
+    async def test_approval_rejects_target_outside_policy(self, client):
+        create_resp = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "test-target-policy",
+                "fingerprint": "fp-target-policy",
+                "alert_name": "Target Policy Test",
+                "severity": "warning",
+                "description": "Test",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        })
+        incident_id = create_resp.json()["id"]
+        parameters = {}
+        response = await client.post(
+            f"/api/incidents/{incident_id}/approvals",
+            headers=self.planner_headers,
+            json={
+                "plan_id": "plan-target-policy",
+                "runbook_ref": "restart_deployment@1",
+                "target": "untrusted-api",
+                "parameters": parameters,
+                "risk_level": "R1",
+                "plan_hash": compute_plan_hash(
+                    "restart_deployment@1", "untrusted-api", parameters, incident_id
+                ),
+                "hypothesis_id": "hyp-target-policy",
+            },
+        )
+        assert response.status_code == 409
+        assert "合法目标" in response.json()["detail"]
 
     async def test_approval_incident_mismatch_is_rejected(self, client):
         headers = self.planner_headers
@@ -575,7 +671,7 @@ class TestApprovals:
             json={
                 "plan_id": "plan-mismatch", "runbook_ref": "restart_deployment@1",
                 "target": "payment-api", "parameters": {}, "risk_level": "R1",
-                "plan_hash": "mismatchhash", "hypothesis_id": "hyp-mismatch",
+                "plan_hash": compute_plan_hash("restart_deployment@1", "payment-api", {}, first.json()["id"]), "hypothesis_id": "hyp-mismatch",
             },
         )
         response = await client.put(
@@ -699,6 +795,10 @@ class TestScenarios:
         assert data["status"] == "AWAITING_APPROVAL"
 
         incident_id = data["incident_id"]
+        checkpoint = control_module.store.get_workflow_checkpoint(incident_id)
+        assert checkpoint is not None
+        assert checkpoint["phase"] == "awaiting_approval"
+        assert checkpoint["completed"] is False
         incident_response = await client.get(f"/api/incidents/{incident_id}")
         assert incident_response.status_code == 200
 

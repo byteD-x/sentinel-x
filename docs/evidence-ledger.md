@@ -17,8 +17,10 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`python -m pytest -q --tb=short --asyncio-mode=auto`，2026-08-02（Windows，本地 light）结果为 `83 passed`。
-- 前端门禁：`npm run build` 与 `npm run lint`（目录 `apps/web-console`）通过。
+- 本地门禁：`pytest -q` 与 `python -m pytest -v --tb=short --asyncio-mode=auto`，2026-08-24（Windows，本地 light）结果为 `161 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算与非法目标/篡改测试，但仍未形成固定 benchmark。
+- 前端门禁：Web Console `npm test -- --run` 为 `23 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
+- Python 轻量门禁：`python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有既存 import/style/type-datetime 规则问题，不能称为完整 lint 通过。
+- 本轮流程收敛：场景启动、审批后执行和 API 启动恢复均通过 `LocalExerciseWorkflow`；审批决定不再直接写入 action/recovery fixture 事件。
 - 限制：Temporal Server replay、PostgreSQL migration、full Kubernetes/observability E2E、数据库绑定审批授权和固定评测仍未完成。
 
 ## 2. Claim 台账
@@ -28,7 +30,7 @@
 | CLM-01 | 持久化事故工作流 | I/T(partial) | “实现了可测试的 Python Workflow fixture 与状态机；Temporal 持久 replay 仍未验证” | Temporal Server replay、Worker restart、history refs、原始日志 |
 | CLM-02 | 跨指标/日志/Trace/K8s 调查 | D | “定义了四类受限诊断工具与 Evidence 引用协议” | full E2E、工具审计、Top-1 report |
 | CLM-03 | 根因 Top-1 | D | “建立了 Top-1 与 B0/B1/C1 评测协议” | holdout dataset、样本数、模型/版本、原始报告 |
-| CLM-04 | 安全审批与受控动作 | I/T(partial) | “light Alert Ingress 校验时间戳 HMAC；Action Gateway 默认 fail-closed，校验 HMAC 审批凭证、audience、管理员令牌、Runbook/目标/参数/hash/expiry 和幂等；动作仍为 fixture，审批记录未数据库绑定” | DB 绑定 approval、TokenReview、消费次数、目标漂移、并发/重放测试 |
+| CLM-04 | 安全审批与受控动作 | I/T(partial) | “light Alert Ingress 校验时间戳、nonce、HMAC 并拒绝同 nonce 重放；Control API 创建审批时重算 MVP policy、目标和 canonical plan hash；Action Gateway 默认 fail-closed，校验 HMAC 审批凭证、audience、管理员令牌、Runbook/目标/参数/hash/expiry 和进程内幂等；动作仍为 fixture，审批记录未数据库绑定” | DB 绑定 approval、TokenReview、消费次数、目标 UID/generation、跨进程/重启重放测试 |
 | CLM-05 | 零重复副作用 | I/T(partial) | “进程内锁覆盖同一幂等键的并发提交测试；不代表跨进程、重启或超时后的零副作用” | submit timeout/Worker restart/数据库唯一约束/并发报告 effect=0 |
 | CLM-06 | 固定攻击集拦截 | D | “定义了提示注入与越权攻击集” | 样本数、拒绝码、合法接受率、安全报告 |
 | CLM-07 | 自动/受控恢复 | D | “设计了自动恢复、restart、scale 三种可区分路径” | 因果对照、SLO observed window、recovery_actor |
