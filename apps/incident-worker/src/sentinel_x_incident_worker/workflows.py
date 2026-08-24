@@ -20,15 +20,17 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from sentinel_x_contracts import IncidentStatus, RiskLevel
+from sentinel_x_domain.services import compute_plan_hash
 from sentinel_x_domain.state_machine import (
     IncidentState,
     IncidentStateMachine,
 )
-from sentinel_x_domain.services import compute_plan_hash
 from sentinel_x_policy import (
     check_mvp_policy,
     classify_runbook_risk,
 )
+
+from sentinel_x_incident_worker.activities import verify_slo_recovery
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +125,11 @@ class WorkflowContext:
     actions: list[ActionResult] = field(default_factory=list)
     error_log: list[str] = field(default_factory=list)
     kill_switch_active: bool = False
+    service_name: str = "inventory-api"
+    target_p99_ms: float = 200.0
+    observed_p99_samples: list[float] = field(default_factory=lambda: [150.0, 180.0])
+    minimum_samples: int = 2
+    verification_result: dict = field(default_factory=dict)
 
     @property
     def budget_exhausted(self) -> bool:
@@ -374,9 +381,10 @@ class IncidentWorkflow:
         if recovered:
             self.sm.transition(IncidentStatus.RESOLVED, reason="SLO 恢复验证通过")
         else:
+            failure_reason = self.ctx.verification_result.get("failure_reason")
             self.sm.transition(
                 IncidentStatus.FAILED,
-                reason="SLO 恢复验证未通过",
+                reason=failure_reason or "SLO 恢复验证未通过",
             )
 
     # -------------------------------------------------------------------
@@ -506,6 +514,10 @@ class IncidentWorkflow:
 
     async def _verify_recovery_activity(self) -> bool:
         """[Activity] 验证 SLO 恢复。"""
-        await asyncio.sleep(0.3)
-        # 确定性测试：始终返回 True，避免随机失败
-        return True
+        self.ctx.verification_result = await verify_slo_recovery(
+            service_name=self.ctx.service_name,
+            target_p99_ms=self.ctx.target_p99_ms,
+            observed_p99_samples=self.ctx.observed_p99_samples,
+            minimum_samples=self.ctx.minimum_samples,
+        )
+        return bool(self.ctx.verification_result.get("recovered"))
