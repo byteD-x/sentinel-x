@@ -15,9 +15,11 @@ from sentinel_x_action_gateway.app import (
     RiskLevel,
     RunbookDefinition,
     app,
+    approval_store,
     gate,
     store,
 )
+from sentinel_x_action_gateway.approval_store import ApprovalRecord, TargetIdentity
 from sentinel_x_domain.services import compute_plan_hash
 
 
@@ -27,6 +29,7 @@ def reset_state():
     store._executions.clear()
     store._idempotency_keys.clear()
     store._consumed_approval_ids.clear()
+    approval_store.clear()
     gate.kill_switch = False
     gate.approval_token_secret = "test-approval-secret"
     gate.admin_token = "test-admin-token"
@@ -62,25 +65,51 @@ def _make_request(
     target: str = "payment-api",
     parameters: dict | None = None,
     incident_id: str = "incident-test-001",
+    expires_at: datetime | None = None,
+    register: bool = True,
+    approval_id: str = "approval-test-001",
 ) -> dict:
     if parameters is None:
         parameters = {"reason": "测试"}
     plan_hash = _make_plan_hash(runbook_ref, target, parameters, incident_id)
+    if expires_at is None:
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
     data = {
         "runbook_ref": runbook_ref,
         "target": target,
         "parameters": parameters,
         "idempotency_key": f"test-key-{hashlib.sha256(str(hash(str(parameters))).encode()).hexdigest()[:12]}",
         "plan_hash": plan_hash,
-        "approval_id": "approval-test-001",
+        "approval_id": approval_id,
         "approval_token": "placeholder-token-001",
-        "approval_expires_at": (
-            datetime.now(timezone.utc) + timedelta(minutes=30)
-        ).isoformat(),
+        "approval_expires_at": expires_at.isoformat(),
         "incident_id": incident_id,
         "audience": "sentinel-action-gateway",
+        "target_identity": {
+            "namespace": "demo-shop",
+            "kind": "Deployment",
+            "name": target,
+            "uid": f"uid-{target}",
+            "generation": 1,
+        },
     }
     data["approval_token"] = _sign_approval_token(data)
+    if register:
+        runbook = REGISTERED_RUNBOOKS.get(runbook_ref)
+        approval_store.register(
+            ApprovalRecord(
+                approval_id=data["approval_id"],
+                incident_id=incident_id,
+                runbook_ref=runbook_ref,
+                target=target,
+                parameters=parameters,
+                plan_hash=plan_hash,
+                risk_level=runbook.risk_level if runbook else ContractRiskLevel.R1,
+                audience=data["audience"],
+                expires_at=expires_at,
+                target_identity=TargetIdentity(**data["target_identity"]),
+            )
+        )
     return data
 
 
@@ -111,6 +140,14 @@ class TestHappyPath:
 @pytest.mark.asyncio
 class TestRejections:
     """拒绝场景。"""
+
+    async def test_missing_authoritative_approval_rejected(self, client):
+        resp = await client.post(
+            "/api/actions",
+            json=_make_request(register=False),
+        )
+        assert resp.status_code == 400
+        assert "审批记录不存在" in resp.json()["detail"]
 
     async def test_unknown_runbook_rejected(self, client):
         resp = await client.post("/api/actions", json=_make_request(
@@ -195,7 +232,10 @@ class TestRejections:
 
     async def test_approval_id_is_consumed_once_across_idempotency_keys(self, client):
         first = _make_request()
-        second = _make_request()
+        second = _make_request(
+            register=False,
+            expires_at=datetime.fromisoformat(first["approval_expires_at"]),
+        )
         second["idempotency_key"] = "test-key-for-approval-replay"
 
         first_response = await client.post("/api/actions", json=first)
@@ -231,6 +271,7 @@ class TestRejections:
         assert wrong_type.status_code == 400
         assert "应为字符串" in wrong_type.json()["detail"]
 
+        approval_store.clear()
         too_long = await client.post("/api/actions", json=_make_request(
             target="inventory-api",
             parameters={"reason": "x" * 501},
@@ -239,11 +280,9 @@ class TestRejections:
         assert "最大长度" in too_long.json()["detail"]
 
     async def test_expired_approval_rejected(self, client):
-        data = _make_request()
-        data["approval_expires_at"] = (
-            datetime.now(timezone.utc) - timedelta(minutes=1)
-        ).isoformat()
-        data["approval_token"] = _sign_approval_token(data)
+        data = _make_request(
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)
+        )
         resp = await client.post("/api/actions", json=data)
         assert resp.status_code == 400
         assert "过期" in resp.json()["detail"]
@@ -257,7 +296,7 @@ class TestRejections:
         resp = await client.post("/api/actions", json=data)
 
         assert resp.status_code == 400
-        assert "审批凭证" in resp.json()["detail"]
+        assert "审批" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio

@@ -45,7 +45,7 @@
 当前阻塞：
 
 - Control API 与 API 契约仍有 `/api` vs `/api/v1`、认证/CSRF/HMAC/幂等/ETag 等差距。
-- Action Gateway 已默认 fail-closed，并校验本地 HMAC 审批凭证、audience、管理员令牌和进程内并发幂等；仍未实现 TokenReview、数据库绑定审批读取与原子消费。
+- Action Gateway 已默认 fail-closed，并校验本地 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份和进程内一次性消费；仍未实现 TokenReview、数据库绑定审批读取与跨进程原子消费。
 - Alert Ingress 已校验时间戳、nonce 和 HMAC，并在 local profile 使用有界 replay cache；body 上限和正式 Alertmanager webhook 契约仍未实现。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
 - Workflow fixture 仍包含模拟执行路径；Worker 在 full profile 下拒绝降级或空循环，不能作为真实 Temporal Worker 证据。

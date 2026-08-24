@@ -33,6 +33,11 @@ from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sentinel_x_contracts import RiskLevel
 from sentinel_x_domain.services import compute_plan_hash
+from sentinel_x_action_gateway.approval_store import (
+    ApprovalRecord,
+    ApprovalStore,
+    TargetIdentity,
+)
 
 logger = logging.getLogger("sentinel_x_action_gateway")
 
@@ -113,6 +118,7 @@ class ActionSubmitRequest(StrictBaseModel):
     approval_expires_at: datetime
     incident_id: str
     audience: str = "sentinel-action-gateway"
+    target_identity: TargetIdentity
 
 
 class ActionStatusResponse(BaseModel):
@@ -219,26 +225,28 @@ class ActionGate:
     def __init__(
         self,
         store: ExecutionStore,
+        approval_store: ApprovalStore,
         kill_switch: bool = True,
         approval_ttl_minutes: int = 30,
         approval_token_secret: str | None = None,
         admin_token: str | None = None,
     ):
         self.store = store
+        self.approval_store = approval_store
         self.kill_switch = kill_switch
         self.approval_ttl_minutes = approval_ttl_minutes
         self.approval_token_secret = approval_token_secret
         self.admin_token = admin_token
 
-    def _expected_approval_token(self, req: ActionSubmitRequest) -> str | None:
+    def _expected_approval_token(self, approval: ApprovalRecord) -> str | None:
         if not self.approval_token_secret:
             return None
         canonical = "|".join((
-            req.approval_id,
-            req.incident_id,
-            req.plan_hash,
-            req.audience,
-            req.approval_expires_at.astimezone(timezone.utc).isoformat(),
+            approval.approval_id,
+            approval.incident_id,
+            approval.plan_hash,
+            approval.audience,
+            approval.expires_at.astimezone(timezone.utc).isoformat(),
         ))
         return hmac.new(
             self.approval_token_secret.encode("utf-8"),
@@ -246,71 +254,110 @@ class ActionGate:
             hashlib.sha256,
         ).hexdigest()
 
-    def validate(self, req: ActionSubmitRequest) -> tuple[bool, str, Optional[RunbookDefinition]]:
+    @staticmethod
+    def _claim_mismatch(approval: ApprovalRecord, req: ActionSubmitRequest) -> str | None:
+        claims = {
+            "incident_id": (req.incident_id, approval.incident_id),
+            "runbook_ref": (req.runbook_ref, approval.runbook_ref),
+            "target": (req.target, approval.target),
+            "parameters": (req.parameters, dict(approval.parameters)),
+            "plan_hash": (req.plan_hash, approval.plan_hash),
+            "audience": (req.audience, approval.audience),
+            "approval_expires_at": (
+                req.approval_expires_at.astimezone(timezone.utc),
+                approval.expires_at.astimezone(timezone.utc),
+            ),
+            "target_identity": (req.target_identity, approval.target_identity),
+        }
+        for field_name, (received, expected) in claims.items():
+            if received != expected:
+                return f"审批记录与请求声明不一致: {field_name}"
+        return None
+
+    def validate(
+        self, req: ActionSubmitRequest
+    ) -> tuple[bool, str, Optional[RunbookDefinition], Optional[ApprovalRecord]]:
         """
         执行完整校验链。
 
         Returns:
-            (allowed, reason, runbook_definition)
+            (allowed, reason, runbook_definition, approval_record)
         """
+        approval = self.approval_store.get(req.approval_id)
+        if approval is None:
+            return False, "审批记录不存在", None, None
+
+        claim_mismatch = self._claim_mismatch(approval, req)
+        if claim_mismatch:
+            return False, claim_mismatch, None, approval
+
+        if approval.status != "approved":
+            return False, f"审批状态不可执行: {approval.status}", None, approval
+
         # 0. Kill Switch
         if self.kill_switch:
-            return False, "Kill Switch 已激活，拒绝所有动作", None
+            return False, "Kill Switch 已激活，拒绝所有动作", None, approval
 
-        if req.audience != "sentinel-action-gateway":
-            return False, "审批凭证 audience 不匹配", None
+        if approval.audience != "sentinel-action-gateway":
+            return False, "审批凭证 audience 不匹配", None, approval
 
-        if req.approval_expires_at.tzinfo is None or req.approval_expires_at.utcoffset() is None:
-            return False, "审批过期时间必须包含时区", None
+        if approval.expires_at.tzinfo is None or approval.expires_at.utcoffset() is None:
+            return False, "审批过期时间必须包含时区", None, approval
 
-        expected_token = self._expected_approval_token(req)
+        expected_token = self._expected_approval_token(approval)
         if not expected_token:
-            return False, "Action Gateway 未配置审批凭证密钥", None
+            return False, "Action Gateway 未配置审批凭证密钥", None, approval
         if not hmac.compare_digest(req.approval_token, expected_token):
-            return False, "审批凭证无效", None
+            return False, "审批凭证无效", None, approval
 
         # 1. Runbook 存在性
-        runbook = REGISTERED_RUNBOOKS.get(req.runbook_ref)
+        runbook = REGISTERED_RUNBOOKS.get(approval.runbook_ref)
         if not runbook:
-            return False, f"未知 Runbook: {req.runbook_ref}", None
+            return False, f"未知 Runbook: {approval.runbook_ref}", None, approval
 
         # 2. MVP 启用检查
         if not runbook.mvp_enabled:
-            return False, f"Runbook {req.runbook_ref} 在 MVP 中未启用", None
+            return False, f"Runbook {approval.runbook_ref} 在 MVP 中未启用", None, approval
 
         # 3. 风险等级
         if runbook.risk_level == RiskLevel.R2:
-            return False, "R2 操作在 MVP 中禁用，请升级人工处理", None
+            return False, "R2 操作在 MVP 中禁用，请升级人工处理", None, approval
         if runbook.risk_level == RiskLevel.R3:
-            return False, "R3 操作永久禁止", None
+            return False, "R3 操作永久禁止", None, approval
+
+        if runbook.risk_level != approval.risk_level:
+            return False, "审批记录风险等级与 Runbook 不一致", None, approval
 
         # 4. 目标白名单
         import re
-        if not re.match(runbook.target_selector, req.target):
+        if not re.match(runbook.target_selector, approval.target):
             return False, (
-                f"目标 '{req.target}' 不在 Runbook {req.runbook_ref} "
+                f"目标 '{approval.target}' 不在 Runbook {approval.runbook_ref} "
                 f"的白名单范围内"
-            ), None
+            ), None, approval
 
         # 5. 参数校验
-        param_errors = self._validate_params(runbook, req.parameters)
+        param_errors = self._validate_params(runbook, dict(approval.parameters))
         if param_errors:
-            return False, f"参数校验失败: {'; '.join(param_errors)}", None
+            return False, f"参数校验失败: {'; '.join(param_errors)}", None, approval
 
         # 6. Plan hash 一致性（防止审批后计划被篡改）
         expected_hash = compute_plan_hash(
-            req.runbook_ref, req.target, req.parameters, req.incident_id
+            approval.runbook_ref,
+            approval.target,
+            dict(approval.parameters),
+            approval.incident_id,
         )
-        if req.plan_hash != expected_hash:
+        if approval.plan_hash != expected_hash:
             return False, (
-                f"Plan hash 不匹配。提交: {req.plan_hash[:8]}..., "
+                f"Plan hash 不匹配。审批记录: {approval.plan_hash[:8]}..., "
                 f"期望: {expected_hash[:8]}..."
-            ), None
+            ), None, approval
 
         # 7. 审批有效期检查
-        now = datetime.now(tz=req.approval_expires_at.tzinfo)
-        if req.approval_expires_at <= now:
-            return False, "审批凭证已过期", None
+        now = datetime.now(tz=approval.expires_at.tzinfo)
+        if approval.expires_at <= now:
+            return False, "审批凭证已过期", None, approval
 
         # 8. 幂等键重复检查
         existing = self.store.check_idempotency(req.idempotency_key)
@@ -318,12 +365,12 @@ class ActionGate:
             return False, (
                 f"幂等键重复。已有执行: {existing.execution_id}, "
                 f"状态: {existing.status}"
-            ), None
+            ), None, approval
 
-        if self.store.is_approval_consumed(req.approval_id):
-            return False, "审批凭证已被消费", None
+        if not self.approval_store.is_consumable(approval):
+            return False, "审批凭证已被消费", None, approval
 
-        return True, "校验通过", runbook
+        return True, "校验通过", runbook, approval
 
     @staticmethod
     def _validate_params(runbook: RunbookDefinition, params: dict) -> list[str]:
@@ -361,7 +408,10 @@ class ActionGate:
         return errors
 
     async def execute(
-        self, runbook: RunbookDefinition, req: ActionSubmitRequest
+        self,
+        runbook: RunbookDefinition,
+        req: ActionSubmitRequest,
+        approval: ApprovalRecord,
     ) -> StoredExecution:
         """
         执行 Runbook。
@@ -369,6 +419,9 @@ class ActionGate:
         在真实环境中，这会调用 Kubernetes API 执行滚动重启或扩容。
         当前为模拟实现。
         """
+        if not self.approval_store.consume(approval):
+            raise RuntimeError("审批凭证在执行前已被消费")
+
         execution_id = str(uuid4())
         started_at = datetime.now()
 
@@ -411,8 +464,10 @@ class ActionGate:
 
 
 store = ExecutionStore()
+approval_store = ApprovalStore()
 gate = ActionGate(
     store=store,
+    approval_store=approval_store,
     kill_switch=True,
     approval_token_secret=os.getenv("SENTINEL_APPROVAL_TOKEN_SECRET"),
     admin_token=os.getenv("SENTINEL_ADMIN_TOKEN"),
@@ -450,12 +505,13 @@ async def submit_action(req: ActionSubmitRequest):
     → 参数合规 → Plan hash 一致 → 幂等键唯一
     """
     async with store.claim_lock:
-        allowed, reason, runbook = gate.validate(req)
+        allowed, reason, runbook, approval = gate.validate(req)
         if not allowed:
             logger.warning(f"动作被拒绝: {reason}")
             raise HTTPException(status_code=400, detail=reason)
 
-        execution = await gate.execute(runbook, req)
+        assert runbook is not None and approval is not None
+        execution = await gate.execute(runbook, req, approval)
 
     return {
         "execution_id": execution.execution_id,
