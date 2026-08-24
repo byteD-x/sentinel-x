@@ -34,7 +34,7 @@ Sentinel-X 是一个面向隔离演练环境的 AI 事故指挥平台原型。�
 | 故障演练目录 | 已实现 | 6 个固定场景，启动后创建可回放事故 |
 | 诊断工具边界 | 已实现并测试 | Prometheus、Loki、Tempo、Kubernetes 只读工具的参数约束 |
 | 人工审批 | light 原型已测试 | 角色门控、完整计划核对、理由化拒绝和 fixture 时间线；不是生产身份认证 |
-| Action Gateway | light 原型已测试 | fail-closed、HMAC 审批凭证、管理员令牌、Runbook/目标/参数/hash/过期和内存并发幂等；不执行真实 Kubernetes 动作 |
+| Action Gateway | light 原型已测试 | fail-closed、HMAC 审批凭证、管理员令牌、Runbook/目标/参数/hash/过期和内存并发幂等；可选 SQLite 审批记录已覆盖重启恢复与原子消费；不执行真实 Kubernetes 动作 |
 | 固定评测 | 设计中 | 评测 runner 和指标定义存在，完整 benchmark 尚未发布 |
 | Kubernetes / OTel 全栈 | proposed | 清单和架构草案存在，尚未作为完成能力声明 |
 
@@ -53,7 +53,7 @@ flowchart LR
     SIGNALS --> DG
 ```
 
-目标架构会把内存存储替换为 PostgreSQL，把异步 fixture 收敛到 Temporal，并在隔离 Kubernetes 集群中接入真实的观测查询和受限执行器。目标架构不等于当前已完成能力。
+目标架构会把 Control API/Action Gateway 的本地内存或 SQLite 存储收敛为 PostgreSQL，把异步 fixture 收敛到 Temporal，并在隔离 Kubernetes 集群中接入真实的观测查询和受限执行器。目标架构不等于当前已完成能力。
 
 ## 快速开始
 
