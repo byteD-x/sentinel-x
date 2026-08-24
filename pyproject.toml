@@ -52,6 +52,7 @@ testpaths = [
 ]
 addopts = "--import-mode=importlib --asyncio-mode=auto"
 pythonpath = [
+    ".",
     "packages/contracts/src",
     "packages/domain/src",
     "packages/policy/src",

@@ -1,0 +1,57 @@
+name: quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/contracts -e packages/domain -e packages/diagnostics -e packages/policy
+          python -m pip install -e apps/control-api -e apps/incident-worker -e apps/action-gateway -e demo/services
+          python -m pip install pytest pytest-asyncio ruff
+      - name: Python tests
+        run: python -m pytest -v --tb=short --asyncio-mode=auto
+      - name: Python lint
+        run: python -m ruff check packages/ apps/ demo/ --select E4,E7,E9
+
+  web-console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web-console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web-console/package-lock.json
+      - run: npm ci
+      - run: npm test -- --run
+      - run: npm run lint
+      - run: npm run build
+
+  terminal-console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/terminal-console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/terminal-console/package-lock.json
+      - run: npm ci
+      - run: npm test -- --run
+      - run: npm run build
