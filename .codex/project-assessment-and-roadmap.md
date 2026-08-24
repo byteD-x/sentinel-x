@@ -42,7 +42,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - Temporal Server replay、Worker 真正注册、Signal/Activity 重启恢复未完成。
 - PostgreSQL migration、projection/outbox、DB 绑定审批和跨进程原子消费未完成。
 - Prometheus/Loki/Tempo/OTel full profile 查询未完成；诊断与动作仍存在模拟路径。
-- Action Gateway 当前为 fixture 执行，不写真实 Kubernetes；恢复验证代码存在“始终成功”的确定性测试路径。
+- Action Gateway 当前为 fixture 执行，不写真实 Kubernetes；恢复验证已改为受控观测样本输入，但仍未连接真实观测源。
 - 正式 `/api/v1`、会话认证、CSRF、ETag、正式幂等契约尚未收敛。
 - 六场景固定 benchmark、holdout 数据集、第二个干净环境 cold run 和可发布证据包未完成。
 - 仓库已有 `.github/workflows/quality.yml`，但尚未有远端 CI run 证据；产品事件埋点/漏斗数据实现仍未完成。
@@ -54,7 +54,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - Claim 等级与证据缺口： [docs/evidence-ledger.md](../docs/evidence-ledger.md:20)、[docs/evidence-ledger.md](../docs/evidence-ledger.md:28)。
 - 真实 Worker 尚未注册： [apps/incident-worker/src/sentinel_x_incident_worker/worker.py](../apps/incident-worker/src/sentinel_x_incident_worker/worker.py:39)。
 - 动作仍为 fixture： [apps/action-gateway/src/sentinel_x_action_gateway/app.py](../apps/action-gateway/src/sentinel_x_action_gateway/app.py:362)。
-- 验证路径固定成功： [apps/incident-worker/src/sentinel_x_incident_worker/activities.py](../apps/incident-worker/src/sentinel_x_incident_worker/activities.py:254)。
+- 验证路径已要求显式观测样本并覆盖空窗口/样本不足/超阈值失败： [apps/incident-worker/src/sentinel_x_incident_worker/activities.py](../apps/incident-worker/src/sentinel_x_incident_worker/activities.py:254)；真实观测源仍未接入。
 - 本地内存状态 + SQLite 快照： [apps/control-api/src/sentinel_x_control_api/app.py](../apps/control-api/src/sentinel_x_control_api/app.py:240)。
 - 目标路线和验收项： [docs/engineering-backlog.md](../docs/engineering-backlog.md:50)。
 
@@ -97,7 +97,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | --- | --- | --- | --- |
 | P0 | 页面展示的证据、恢复和执行结果部分来自 fixture/模拟数据 | 用户可能把演示结果误认为真实观测结论 | 所有页面统一显示 `fixture/live/replay`、profile 和数据新鲜度；真实数据未接入时禁用“已恢复”强语义 |
 | P0 | 角色由 `X-Sentinel-Role` 本地 header 门控 | 任何能调用本地 API 的人都可能伪造角色 | light 保持 local-only 明示；full 实现服务端会话/OIDC、CSRF、职责分离和审计身份 |
-| P0 | Action Gateway 不连接真实目标，SLO 验证有固定成功路径 | 用户无法证明动作真的改变业务状态 | 先接 fake K8s API 做真实状态变更和失败注入，再接隔离 kind/k3d；验证必须读取真实 observed window |
+| P0 | Action Gateway 不连接真实目标，SLO 验证仅接受受控样本 | 用户无法证明动作真的改变业务状态 | 先接 fake K8s API 做真实状态变更和失败注入，再接隔离 kind/k3d；验证必须读取真实 observed window |
 | P0 | Gateway 只检查请求体带来的 approval_id/expiry/hash，未从独立数据库读取不可变批准记录，也未校验 namespace、UID/generation | 持有共享凭证的调用者可能伪造批准或面对目标漂移执行 | Gateway 使用独立 DB 角色、TokenReview/mTLS、目标身份绑定和一次性原子消费 |
 | P1 | 事故回放目前主要是内存/SQLite 快照，导出包和持久 SSE 仍未完成 | 刷新、重启、复盘和跨人协作可信度不足 | PostgreSQL timeline/outbox + SSE gap/reconnect + 脱敏事故包 hash |
 | P1 | 真实审批完成后，Control API 当前可直接写入 action/recovery 事件并标记 RESOLVED | UI 看到的“执行成功”不等于 Gateway 或业务真实成功 | 终态只能由执行结果协调和真实 SLO VerificationResult 推进，动作成功与恢复成功分离 |

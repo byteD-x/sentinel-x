@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
@@ -245,6 +246,8 @@ async def verify_slo_recovery(
     baseline_window_minutes: int = 15,
     observed_window_minutes: int = 10,
     target_p99_ms: float = 200.0,
+    observed_p99_samples: Optional[list[float]] = None,
+    minimum_samples: int = 1,
 ) -> dict:
     """
     [Activity] 验证服务 SLO 恢复。
@@ -252,10 +255,22 @@ async def verify_slo_recovery(
     通过比较 baseline 和 observed 窗口的指标来判断恢复。
     """
     await asyncio.sleep(0.3)
-
-    # 确定性测试：始终返回恢复成功
-    observed_p99 = 150.0
-    recovered = True
+    samples = observed_p99_samples or []
+    failure_reason: str | None = None
+    if not samples:
+        failure_reason = "观测窗口无数据"
+        observed_p99 = None
+    elif len(samples) < minimum_samples:
+        failure_reason = "观测样本不足"
+        observed_p99 = max(samples)
+    elif any(not math.isfinite(sample) or sample < 0 for sample in samples):
+        failure_reason = "观测样本无效"
+        observed_p99 = max(samples)
+    else:
+        observed_p99 = max(samples)
+        if observed_p99 > target_p99_ms:
+            failure_reason = "观测窗口超过 SLO 阈值"
+    recovered = failure_reason is None
 
     return {
         "service": service_name,
@@ -263,5 +278,8 @@ async def verify_slo_recovery(
         "observed_p99_ms": observed_p99,
         "recovered": recovered,
         "verification_window_minutes": observed_window_minutes,
+        "baseline_window_minutes": baseline_window_minutes,
+        "sample_count": len(samples),
+        "failure_reason": failure_reason,
         "verified_at": datetime.now().isoformat(),
     }
