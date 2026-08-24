@@ -39,6 +39,11 @@ from sentinel_x_action_gateway.approval_store import (
     TargetIdentity,
     build_approval_store,
 )
+from sentinel_x_action_gateway.executor import (
+    ActionExecutionResult,
+    ActionExecutor,
+    FixtureActionExecutor,
+)
 
 logger = logging.getLogger("sentinel_x_action_gateway")
 
@@ -125,7 +130,7 @@ class ActionSubmitRequest(StrictBaseModel):
 class ActionStatusResponse(BaseModel):
     """动作状态响应。"""
     execution_id: str
-    status: str  # pending | running | succeeded | failed | rejected
+    status: str  # pending | running | succeeded | failed | unknown | rejected
     runbook_ref: str
     target: str
     idempotency_key: str
@@ -231,6 +236,7 @@ class ActionGate:
         approval_ttl_minutes: int = 30,
         approval_token_secret: str | None = None,
         admin_token: str | None = None,
+        executor: ActionExecutor | None = None,
     ):
         self.store = store
         self.approval_store = approval_store
@@ -238,6 +244,7 @@ class ActionGate:
         self.approval_ttl_minutes = approval_ttl_minutes
         self.approval_token_secret = approval_token_secret
         self.admin_token = admin_token
+        self.executor = executor or FixtureActionExecutor()
 
     def _expected_approval_token(self, approval: ApprovalRecord) -> str | None:
         if not self.approval_token_secret:
@@ -417,8 +424,8 @@ class ActionGate:
         """
         执行 Runbook。
 
-        在真实环境中，这会调用 Kubernetes API 执行滚动重启或扩容。
-        当前为模拟实现。
+        执行器负责提供 before/after 状态；默认 light 使用 fixture，隔离
+        测试可注入 fake Kubernetes 执行器。
         """
         if not self.approval_store.consume(approval):
             raise RuntimeError("审批凭证在执行前已被消费")
@@ -426,8 +433,23 @@ class ActionGate:
         execution_id = str(uuid4())
         started_at = datetime.now()
 
-        # 模拟 before 状态
-        before_state = f"{req.target}: replicas=3, status=running"
+        try:
+            before_state = self.executor.describe(req.target_identity)
+        except Exception as error:  # noqa: BLE001 - 执行器边界需收敛为失败记录
+            execution = StoredExecution(
+                execution_id=execution_id,
+                approval_id=req.approval_id,
+                status="failed",
+                runbook_ref=req.runbook_ref,
+                target=req.target,
+                idempotency_key=req.idempotency_key,
+                error=str(error),
+                started_at=started_at,
+                completed_at=datetime.now(),
+                execution_mode=self.executor.execution_mode,
+            )
+            self.store.create(execution)
+            return execution
 
         execution = StoredExecution(
             execution_id=execution_id,
@@ -438,21 +460,25 @@ class ActionGate:
             idempotency_key=req.idempotency_key,
             before_state=before_state,
             started_at=started_at,
-            execution_mode="fixture",
+            execution_mode=self.executor.execution_mode,
         )
         self.store.create(execution)
 
-        # 模拟执行
-        import asyncio
-        await asyncio.sleep(0.5)
+        try:
+            result: ActionExecutionResult = self.executor.execute(
+                req.runbook_ref,
+                req.target_identity,
+                dict(req.parameters),
+            )
+        except Exception as error:  # noqa: BLE001 - 执行器边界需收敛为失败记录
+            result = ActionExecutionResult(status="failed", error=str(error))
 
-        # 模拟执行成功
-        after_state = f"{req.target}: replicas=3, status=healthy"
         self.store.update(
             execution_id,
-            status="succeeded",
-            after_state=after_state,
-            output=f"成功执行 {req.runbook_ref} on {req.target}",
+            status=result.status,
+            after_state=result.after_state,
+            output=result.output,
+            error=result.error,
             completed_at=datetime.now(),
         )
 
@@ -521,7 +547,7 @@ async def submit_action(req: ActionSubmitRequest):
         "target": execution.target,
         "idempotency_key": execution.idempotency_key,
         "execution_mode": execution.execution_mode,
-        "message": "light fixture 已提交；未执行真实 Kubernetes 写操作",
+        "message": f"{execution.execution_mode} 执行器已提交；真实 Kubernetes 写操作仍未开放",
     }
 
 
