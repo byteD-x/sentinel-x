@@ -44,6 +44,7 @@
 | `SENTINEL_ACTIONS_ENABLED` | `false` | 否 | `full` 才可 true；policy 最终决定 |
 | `SENTINEL_KILL_SWITCH` | `true` | 否 | 安全默认开启；权威状态最终存数据库/控制面 |
 | `SENTINEL_DATA_DIR` | `.local/data` | 否 | 必须解析在项目本地数据根内 |
+| `SENTINEL_APPROVAL_STORE_DB` | 未设置（内存） | 否 | Action Gateway local/full 可指向 SQLite；未设置时仅为 light 进程内存储 |
 | `SENTINEL_ARTIFACTS_DIR` | `.local/artifacts` | 否 | 导出前脱敏；禁止根目录/用户目录 |
 
 环境变量中的 kill switch 只是启动默认值；运行时权威状态、操作者和原因必须持久化，不依赖修改 Pod env 即时生效。

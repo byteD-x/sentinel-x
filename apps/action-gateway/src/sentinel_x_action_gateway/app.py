@@ -37,6 +37,7 @@ from sentinel_x_action_gateway.approval_store import (
     ApprovalRecord,
     ApprovalStore,
     TargetIdentity,
+    build_approval_store,
 )
 
 logger = logging.getLogger("sentinel_x_action_gateway")
@@ -464,7 +465,7 @@ class ActionGate:
 
 
 store = ExecutionStore()
-approval_store = ApprovalStore()
+approval_store = build_approval_store(os.getenv("SENTINEL_APPROVAL_STORE_DB"))
 gate = ActionGate(
     store=store,
     approval_store=approval_store,
