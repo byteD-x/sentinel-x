@@ -1,5 +1,6 @@
 """Temporal durable thin slice 的注册、Signal 和边界测试。"""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -198,3 +199,57 @@ async def test_temporal_server_executes_signal_path_and_replays_history():
 
     assert result.status == "RESOLVED"
     assert replay.replay_failure is None
+
+
+@pytest.mark.asyncio
+async def test_temporal_workflow_resumes_after_worker_restart():
+    """Worker 在审批等待点重启后，Workflow history 和 Signal 仍能继续。"""
+
+    async with await WorkflowEnvironment.start_local() as environment:
+        workflow_input = IncidentWorkflowInput(
+            incident_id="incident-worker-restart",
+            approval_id="approval-worker-restart",
+            plan_hash="plan-worker-restart",
+        )
+
+        async with Worker(
+            environment.client,
+            task_queue="temporal-restart-queue",
+            workflows=[TemporalIncidentWorkflow],
+            activities=temporal_runtime.TEMPORAL_ACTIVITIES,
+        ):
+            handle = await environment.client.start_workflow(
+                TemporalIncidentWorkflow.run,
+                workflow_input,
+                id="incident-worker-restart",
+                task_queue="temporal-restart-queue",
+            )
+            for _ in range(100):
+                snapshot = await handle.query(TemporalIncidentWorkflow.workflow_status)
+                if snapshot.status == "AWAITING_APPROVAL":
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Workflow 未进入审批等待点")
+
+        await handle.signal(
+            TemporalIncidentWorkflow.approval_decision,
+            ApprovalDecision(
+                approval_id="approval-worker-restart",
+                plan_hash="plan-worker-restart",
+                approved=True,
+                decided_by="restart-test-operator",
+                expires_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+            ),
+        )
+
+        async with Worker(
+            environment.client,
+            task_queue="temporal-restart-queue",
+            workflows=[TemporalIncidentWorkflow],
+            activities=temporal_runtime.TEMPORAL_ACTIVITIES,
+        ):
+            result = await handle.result()
+
+    assert result.status == "RESOLVED"
+    assert result.history[-3:] == ["EXECUTING", "VERIFYING", "RESOLVED"]
