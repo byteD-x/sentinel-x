@@ -205,7 +205,7 @@ data: {"schema_version":"1.0","incident_id":"inc_example","sequence":184,"event_
 - 客户端按 `incident_id + sequence` 去重，发现 gap 立即暂停实时渲染并 REST 补齐。
 - payload 不包含原始秘密、审批凭证或完整大 Evidence。
 
-当前 light/prototype `GET /api/incidents/{id}/stream` 会发送 `id: <sequence>` 与 `event: timeline_event`，接受数值 `Last-Event-ID` 从下一序号补发；前端同时以 REST timeline 补读防止连接缺口。它没有数据库保留窗口、心跳或 410 过期语义，不能视为完整 SSE 契约实现。
+当前 light/prototype 同时注册兼容路径 `GET /api/incidents/{id}/stream` 与受 local session 门控的 `GET /api/v1/incidents/{id}/stream`；两者都会发送 `id: <sequence>` 与 `event: timeline_event`，接受数值 `Last-Event-ID` 从下一序号补发。前端同时以 REST timeline 补读防止连接缺口。它没有数据库保留窗口、心跳或 410 过期语义，不能视为完整 SSE 契约实现。
 
 ## 11. Approval API
 

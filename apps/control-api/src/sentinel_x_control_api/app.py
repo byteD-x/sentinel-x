@@ -1711,6 +1711,7 @@ app.add_api_route("/api/v1/incidents", create_incident, methods=["POST"], status
 app.add_api_route("/api/v1/incidents", list_incidents, methods=["GET"], response_model=IncidentListResponse, dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}", get_incident, methods=["GET"], response_model=IncidentOverviewResponse, dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/timeline", get_timeline, methods=["GET"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/incidents/{incident_id}/stream", stream_incident, methods=["GET"], dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/approvals", request_approval, methods=["POST"], status_code=201, dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/approvals/{approval_id}", decide_approval, methods=["PUT"], dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/approvals", list_approvals, methods=["GET"], dependencies=_v1_auth)
