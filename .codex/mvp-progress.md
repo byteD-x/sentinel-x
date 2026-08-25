@@ -9,7 +9,7 @@ fixture、静态契约或本地测试升级成真实 full profile 证据。
 
 | 区域 | 状态 | 证据 |
 | --- | --- | --- |
-| Control API | TESTED | `/api/v1` local HMAC session、ETag/If-Match、Alertmanager HMAC webhook、body limit；`python -m pytest -q apps/control-api/tests` |
+| Control API | TESTED | `/api/v1` local HMAC session、ETag/If-Match、版本化 SSE、Alertmanager HMAC webhook、body limit；`python -m pytest -q apps/control-api/tests` |
 | Local persistence | TESTED | SQLite snapshot v2、outbox 恢复/发布确认、审批原子消费 |
 | PostgreSQL | IMPLEMENTED/STATIC-TESTED | `migrations/versions/0001_domain.sql`、down migration、7 项 SQL contract tests；未连接 PostgreSQL |
 | Scenario Runner | TESTED | 6 场景 × 3 轮注入/观测/幂等 cleanup、dirty gate；`python scripts/run_scenario_matrix.py` |
@@ -38,4 +38,3 @@ python scripts/run_scenario_matrix.py --cycles 3 --output evidence/scenario-matr
 python scripts/run_security_attack_set.py evidence/security-attack-set.json
 python scripts/build_evidence_bundle.py --output evidence/bundle --artifact evidence/scenario-matrix.json --artifact evidence/security-attack-set.json
 ```
-

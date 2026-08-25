@@ -137,6 +137,22 @@ class TestVersionedApi:
         assert response.status_code == 503
         assert "会话认证" in response.json()["detail"]
 
+    async def test_v1_stream_fails_closed_without_session_key(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", None)
+        response = await client.get("/api/v1/incidents/missing/stream")
+        assert response.status_code == 503
+        assert "会话认证" in response.json()["detail"]
+
+    async def test_v1_stream_authenticates_before_loading_incident(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+        viewer = control_module.build_local_session_token("viewer", int(time.time()) + 300)
+        response = await client.get(
+            "/api/v1/incidents/missing/stream",
+            headers={"Authorization": viewer},
+        )
+        assert response.status_code == 404
+        assert "不存在" in response.json()["detail"]
+
     async def test_v1_detail_returns_etag_and_requires_if_match_for_decision(self, client, monkeypatch):
         monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
         started = await client.post(
