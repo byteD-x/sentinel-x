@@ -88,6 +88,10 @@ API 调用 `/api/actions` 时发送 `X-Sentinel-Service-Name: control-api`、当
 
 Control API/Worker 使用领域 DB 角色；Action Gateway 使用更小的 approval/action 专用角色，连接凭据必须分开。
 
+full profile 的 Kubernetes 诊断只读适配器使用 `KUBERNETES_API_URL` 和
+`KUBERNETES_SERVICEACCOUNT_TOKEN`，只请求 `demo-shop` namespace 的 PodList，禁止
+请求参数覆盖基址或执行写操作；未配置时 Activity fail-closed。
+
 ## 7. 可观测性
 
 | 变量 | 默认 | 敏感 | 规则 |

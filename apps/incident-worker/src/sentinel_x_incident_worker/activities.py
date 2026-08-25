@@ -13,6 +13,7 @@ import logging
 import math
 import os
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 from datetime import datetime
 from typing import Optional
@@ -225,17 +226,55 @@ async def collect_k8s_pod_status(
     权限: diagnostic-sa，仅 get/list/watch
     禁止: Secrets、exec、写操作
     """
-    _require_real_full_adapter("Kubernetes")
-    await asyncio.sleep(0.15)
-    return {
-        "evidence_id": str(uuid4()),
-        "source": "kubernetes",
-        "query": f"kubectl get pods -n {namespace}" + (f" -l {label_selector}" if label_selector else ""),
-        "summary": f"Pod 状态查询结果（namespace={namespace}）",
-        "raw_hash": hashlib.sha256(f"{namespace}{label_selector}".encode()).hexdigest()[:16],
-        "collected_at": datetime.now().isoformat(),
-        "truncated": False,
-    }
+    query = f"pods namespace={namespace}" + (f" label={label_selector}" if label_selector else "")
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        await asyncio.sleep(0.15)
+        return {
+            "evidence_id": str(uuid4()), "source": "kubernetes", "query": query,
+            "summary": f"Pod 状态查询结果（namespace={namespace}）",
+            "raw_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
+            "collected_at": datetime.now().isoformat(), "truncated": False,
+        }
+    if namespace != "demo-shop":
+        raise RuntimeError("Kubernetes 诊断只允许 demo-shop namespace")
+    base_url = os.getenv("KUBERNETES_API_URL", "")
+    token = os.getenv("KUBERNETES_SERVICEACCOUNT_TOKEN", "")
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+        raise RuntimeError("full profile Kubernetes adapter URL 无效")
+    if not token:
+        raise RuntimeError("full profile Kubernetes adapter 缺少服务账号 Token")
+    query_params = {"labelSelector": label_selector} if label_selector else {}
+    url = f"{base_url.rstrip('/')}/api/v1/namespaces/{quote(namespace, safe='')}/pods"
+    if query_params:
+        url += "?" + urlencode(query_params)
+    request = Request(url, headers={"Accept": "application/json", "Authorization": f"Bearer {token}"}, method="GET")
+
+    def call() -> dict:
+        try:
+            with urlopen(request, timeout=float(os.getenv("KUBERNETES_TIMEOUT_SECONDS", "3"))) as response:
+                payload = json.loads(response.read(1024 * 1024))
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Kubernetes Pod 状态查询失败") from exc
+        if not isinstance(payload, dict) or payload.get("kind") not in {"PodList", None}:
+            raise RuntimeError("Kubernetes Pod 响应类型不可信")
+        items = payload.get("items", [])
+        if not isinstance(items, list):
+            raise RuntimeError("Kubernetes Pod 响应缺少 items")
+        phases = {}
+        for item in items:
+            phase = ((item.get("status") or {}).get("phase") if isinstance(item, dict) else None) or "Unknown"
+            phases[phase] = phases.get(phase, 0) + 1
+        return {
+            "evidence_id": str(uuid4()), "source": "kubernetes", "source_mode": "observed",
+            "source_ref": "kubernetes://configured", "query": query,
+            "summary": f"Pod 状态查询成功（namespace={namespace}, phases={phases}）",
+            "raw_hash": hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
+            "pod_count": len(items), "phase_counts": phases,
+            "collected_at": datetime.now().isoformat(), "truncated": False,
+        }
+
+    return await asyncio.to_thread(call)
 
 
 # ---------------------------------------------------------------------------

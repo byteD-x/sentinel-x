@@ -1,6 +1,7 @@
 import pytest
 
 from sentinel_x_incident_worker.activities import (
+    collect_k8s_pod_status,
     collect_prometheus_evidence,
     submit_action_to_gateway,
     verify_slo_recovery,
@@ -145,3 +146,33 @@ async def test_full_profile_action_activity_calls_gateway(monkeypatch):
         target_identity={"namespace": "demo-shop", "kind": "Deployment", "name": "inventory-api", "uid": "uid-1", "generation": 1},
     )
     assert result["execution_id"] == "exec-1"
+
+
+@pytest.mark.asyncio
+async def test_full_profile_kubernetes_activity_reads_pod_list(monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROFILE", "full")
+    monkeypatch.setenv("KUBERNETES_API_URL", "https://kubernetes.local")
+    monkeypatch.setenv("KUBERNETES_SERVICEACCOUNT_TOKEN", "token")
+    from sentinel_x_incident_worker import activities
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, _limit):
+            return b'{"kind":"PodList","items":[{"status":{"phase":"Running"}},{"status":{"phase":"Pending"}}]}'
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url.endswith("/api/v1/namespaces/demo-shop/pods")
+        assert request.get_header("Authorization") == "Bearer token"
+        assert timeout == 3.0
+        return Response()
+
+    monkeypatch.setattr(activities, "urlopen", fake_urlopen)
+    result = await collect_k8s_pod_status()
+    assert result["source_mode"] == "observed"
+    assert result["pod_count"] == 2
+    assert result["phase_counts"] == {"Running": 1, "Pending": 1}

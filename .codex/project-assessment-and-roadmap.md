@@ -47,7 +47,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - 当前 `python -m pytest -q` 可在本地 Windows 环境完成 **225 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
 - `[部分完成]` Temporal Server replay、Worker 注册、Signal/Activity retry 和 Worker 重启已在单场景 thin slice 验证；多场景 full profile、history refs 对账和 PostgreSQL projection 仍未完成。
 - `[部分完成]` Action Gateway SQLite 审批存储已支持重启恢复和跨连接原子消费；PostgreSQL migration、projection/outbox、Control API 到 Gateway 的 DB 绑定审批和跨服务事务仍未完成。
-- `[部分完成]` Prometheus/Loki/Tempo full profile Activity 已接入受限 HTTP 来源并在缺配置/后端失败时拒绝；Kubernetes/OTel full E2E、Action Gateway HTTP 调用和真实 SLO 窗口仍未完成。
+- `[部分完成]` Prometheus/Loki/Tempo 与固定 namespace Kubernetes PodList full profile Activity 已接入受限 HTTP 来源并在缺配置/后端失败时拒绝；真实集群 RBAC/OTel E2E 和跨服务 ActionExecution 对账仍未完成。
 - `[部分完成]` Action Gateway 默认仍为 fixture 执行；受控 fake Kubernetes 仅在隔离测试中验证状态变化和失败注入，不写真实 Kubernetes，恢复验证也仍未连接真实观测源。
 - `[部分完成]` 正式 `/api/v1` approval-requests 列表/详情/decision、local session、CSRF、ETag/If-Match 和 body 绑定幂等契约已收敛；full profile 已将幂等响应持久化到 PostgreSQL，仍缺 OIDC/服务身份与副作用崩溃窗口 reconcile。
 - `[未完成]` 六场景固定 benchmark、holdout 数据集、第二个干净环境 cold run 和可发布证据包未完成。
