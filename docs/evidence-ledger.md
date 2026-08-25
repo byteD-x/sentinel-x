@@ -26,6 +26,7 @@
 - Action Gateway 审批持久化切片：新增 SQLite 审批记录、不可变登记、重启恢复、撤销和 SQL 条件更新原子消费；这是本地 durable backend，不等同于 full profile PostgreSQL migration/outbox 或跨服务事务。
 - Action Gateway 执行器切片：新增可替换执行器边界和受控 fake Kubernetes Deployment API，验证 restart/scale、UID/generation 漂移、ready 状态及 timeout/partial-ready/unknown；仅为隔离测试实现，不等同于真实 Kubernetes API 或 full profile。
 - PostgreSQL migration runner：`python scripts/migrate_postgres.py --database-url ...` 已实现版本顺序、checksum 漂移拒绝、重复执行幂等和 `SELECT 1` fail-closed 健康检查；单元测试覆盖 fake connection。当前环境没有 Docker/PostgreSQL，未形成真实数据库 migration/约束集成证据。
+- PostgreSQL schema integration：`SENTINEL_POSTGRES_ADMIN_URL=... python -m pytest -q apps/control-api/tests/test_postgres_integration.py -m integration` 在本机 PostgreSQL 15 临时数据库通过 `1 passed`；`scripts/verify_postgres_migrations.py` 真实验证 up/重复 up、8 张表、索引/append-only trigger、active fingerprint 唯一约束、down/reapply，并在 finally 删除临时库。该证据只覆盖 schema，不代表应用 repository/projection/outbox 已完成。
 - Full profile 安全边界：Control API 在 `SENTINEL_PROFILE=full` 且 PostgreSQL repository/projection 尚未接线时显式 fail-closed；新增生命周期测试，防止误用本地 SQLite 冒充 full。
 - SQLite projection durable slice：`SQLiteOutboxProjector` 持久化 aggregate sequence、event 去重和 pending 发布状态，覆盖 sink 失败、重启恢复、缺口和旧序号冲突；不等同于 PostgreSQL dispatcher 的租约、并发 claim 或跨服务事务。
 - Incident Worker full 安全边界：Prometheus/Loki/Tempo/Kubernetes/Action Gateway/SLO fixture Activity 在 `SENTINEL_PROFILE=full` 且未配置真实 adapter 时统一拒绝，避免 Temporal full 路径返回合成成功；light fixture 测试保持可用。

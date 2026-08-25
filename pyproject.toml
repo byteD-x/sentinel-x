@@ -51,6 +51,9 @@ testpaths = [
     "evals/tests",
 ]
 addopts = "--import-mode=importlib --asyncio-mode=auto"
+markers = [
+    "integration: requires an explicitly configured external service",
+]
 pythonpath = [
     ".",
     "packages/contracts/src",

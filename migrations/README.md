@@ -14,9 +14,11 @@ SQLite approval store. It must not be described as an implementation of this
 PostgreSQL schema. No migration in this directory creates extensions, roles,
 credentials, or connections to a database.
 
-The runner and unit tests are implemented, but this repository currently has
-no PostgreSQL service in the local verification environment. Runtime domain
-repository, projection/dispatcher, Temporal reconciliation, and live database
-integration evidence remain separate work items.
+The runner and unit tests are implemented. When PostgreSQL is available,
+`SENTINEL_POSTGRES_ADMIN_URL=... python -m pytest -q apps/control-api/tests/test_postgres_integration.py -m integration`
+performs an isolated up/down/reapply and constraint check, then removes its
+temporary database. Runtime domain repository, projection/dispatcher,
+Temporal reconciliation, and live application integration remain separate work
+items.
 The local profile does not implement this PostgreSQL schema and does not silently
 fall back to it when the full-profile database is unavailable.
