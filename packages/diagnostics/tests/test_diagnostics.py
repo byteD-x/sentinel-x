@@ -106,3 +106,11 @@ def test_rejects_cross_namespace_kubernetes_query():
     )
 
     assert any("不在允许范围" in error for error in errors)
+
+
+def test_full_profile_rejects_simulated_gateway_without_source(monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROFILE", "full")
+    gateway = DiagnosticGateway(simulate_latency=False)
+
+    with pytest.raises(TelemetrySourceError, match="真实遥测来源"):
+        gateway.query(DiagnosticToolType.QUERY_PROMETHEUS, {"query": "up"})

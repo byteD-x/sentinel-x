@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import random
 import time
 from dataclasses import dataclass, field
@@ -339,6 +340,11 @@ class DiagnosticGateway:
         errors = validate_tool_params(tool_def, parameters)
         if errors:
             raise ValueError(f"参数校验失败: {'; '.join(errors)}")
+
+        if self.source is None and os.getenv("SENTINEL_PROFILE", "light") == "full":
+            raise TelemetrySourceError(
+                "full profile 未配置真实遥测来源，拒绝返回场景模拟数据"
+            )
 
         # 模拟延迟
         if self.simulate_latency:
