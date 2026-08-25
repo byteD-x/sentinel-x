@@ -49,7 +49,7 @@
 - Alert Ingress 已校验时间戳、nonce、HMAC 和有界 body，并提供版本化 Alertmanager webhook 转换；仍未完成 PostgreSQL 去重事务和真实 Alertmanager/观测栈联调。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
 - light Workflow fixture 的动作执行仍是模拟路径，但恢复结论已改为读取受控观测样本；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal、Worker restart 和 history replay。
-- full 多场景 Temporal replay、PostgreSQL projection/outbox 和 full observability E2E 未完成；Control API 现在会在 `SENTINEL_PROFILE=full` 下 fail-closed，禁止静默回退到本地 SQLite。当前 outbox 仅为 local SQLite 可恢复切片。
+- full 多场景 Temporal replay、PostgreSQL projection/outbox 和 full observability E2E 未完成；Control API 现在会在 `SENTINEL_PROFILE=full` 下 fail-closed，Incident Worker 的合成观测/动作 Activity 也会拒绝执行，禁止静默回退到本地 SQLite 或 fixture 成功。当前 outbox 仅为 local SQLite 可恢复切片。
 - 默认质量门禁需持续覆盖全部真实测试目录，并保留原始输出。
 
 ## 5. D2 Demo MVP 门禁

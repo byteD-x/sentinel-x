@@ -1,6 +1,10 @@
 import pytest
 
-from sentinel_x_incident_worker.activities import verify_slo_recovery
+from sentinel_x_incident_worker.activities import (
+    collect_prometheus_evidence,
+    submit_action_to_gateway,
+    verify_slo_recovery,
+)
 
 
 @pytest.mark.asyncio
@@ -43,3 +47,22 @@ async def test_slo_verification_requires_all_samples_within_threshold():
     assert recovered["observed_p99_ms"] == 180.0
     assert degraded["recovered"] is False
     assert degraded["failure_reason"] == "观测窗口超过 SLO 阈值"
+
+
+@pytest.mark.asyncio
+async def test_full_profile_refuses_synthetic_observation_and_action(monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROFILE", "full")
+
+    with pytest.raises(RuntimeError, match="Prometheus adapter"):
+        await collect_prometheus_evidence("up")
+    with pytest.raises(RuntimeError, match="Action Gateway adapter"):
+        await submit_action_to_gateway(
+            "http://gateway",
+            "restart_deployment@1",
+            "inventory-api",
+            {},
+            "idempotency-key-1234",
+            "approval-token",
+        )
+    with pytest.raises(RuntimeError, match="SLO observation adapter"):
+        await verify_slo_recovery("inventory-api", observed_p99_samples=[100.0])
