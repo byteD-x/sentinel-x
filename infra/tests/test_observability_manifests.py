@@ -41,3 +41,13 @@ def test_observability_stack_is_pinned_non_privileged_and_resource_bounded():
         assert container["securityContext"]["readOnlyRootFilesystem"] is True
         assert container["securityContext"]["capabilities"]["drop"] == ["ALL"]
         assert "limits" in container["resources"]
+
+
+def test_prometheus_discovery_uses_read_only_rbac():
+    documents = _documents(ROOT / "stack.yaml")
+    role = next(item for item in documents if item["kind"] == "ClusterRole")
+    verbs = {verb for rule in role["rules"] for verb in rule["verbs"]}
+
+    assert verbs == {"get", "list", "watch"}
+    binding = next(item for item in documents if item["kind"] == "ClusterRoleBinding")
+    assert binding["roleRef"]["name"] == role["metadata"]["name"]
