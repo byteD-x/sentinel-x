@@ -213,7 +213,7 @@ data: {"schema_version":"1.0","incident_id":"inc_example","sequence":184,"event_
 
 approver 查看 `PENDING` 请求，可按过期时间、risk 和 service 筛选。
 
-当前 light/prototype 实现提供 `GET /api/approvals?status=pending|all|approved|rejected|expired`，返回审批记录及其关联事故摘要，用于 Web Console 审批队列。`PUT /api/incidents/{incident_id}/approvals/{approval_id}` 要求 `X-Sentinel-Role: approver`，并校验审批与事故归属；该 header 仅用于 local-demo。端点尚未实现正式契约要求的认证、ETag、CSRF 和数据库持久化，不能视为 full profile 审批 API。
+当前 light/prototype 实现提供 `GET /api/approvals?status=pending|all|approved|rejected|expired`，返回审批记录及其关联事故摘要，用于 Web Console 审批队列。`PUT /api/incidents/{incident_id}/approvals/{approval_id}` 要求 `X-Sentinel-Role: approver`，并校验审批与事故归属；该 header 仅用于 local-demo。full profile 的 `/api/v1` 状态变更已要求签名会话、CSRF 和 body 绑定 `Idempotency-Key`，审批数据写入 PostgreSQL；正式 OIDC/服务身份与完整 `/api/v1/approval-requests` 资源契约仍未完成。
 
 ### `GET /api/v1/approval-requests/{id}`
 

@@ -1101,6 +1101,8 @@ ALERT_INGRESS_REPLAY_TTL_SECONDS = int(os.getenv("ALERT_INGRESS_REPLAY_TTL_SECON
 ALERT_INGRESS_REPLAY_MAX_ENTRIES = int(os.getenv("ALERT_INGRESS_REPLAY_MAX_ENTRIES", "10000"))
 _ALERT_INGRESS_REPLAY_CACHE: dict[str, float] = {}
 _ALERT_INGRESS_REPLAY_LOCK = threading.Lock()
+_IDEMPOTENCY_CACHE: dict[tuple[str, str, str], tuple[str, int, dict[str, str], bytes]] = {}
+_IDEMPOTENCY_LOCK = threading.Lock()
 LOCAL_SESSION_SIGNING_KEY = os.getenv("SENTINEL_LOCAL_SESSION_SIGNING_KEY")
 API_VERSION = "v1"
 
@@ -1187,6 +1189,43 @@ async def limit_request_body(request: Request, call_next):
                 content={"detail": "Alert Ingress 请求体超过上限"},
             )
     return await call_next(request)
+
+
+@app.middleware("http")
+async def require_full_idempotency(request: Request, call_next):
+    """full profile 状态变更要求 body 绑定的 Idempotency-Key。"""
+    mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    if os.getenv("SENTINEL_PROFILE", "light") != "full" or not mutating or not request.url.path.startswith("/api/v1/"):
+        return await call_next(request)
+    key = request.headers.get("Idempotency-Key", "")
+    if not 16 <= len(key) <= 128:
+        return JSONResponse(status_code=400, content={"detail": "full profile 需要有效 Idempotency-Key"})
+    body = await request.body()
+    actor = request.headers.get("Authorization", "")
+    cache_key = (actor, request.url.path, key)
+    body_hash = hashlib.sha256(body).hexdigest()
+    with _IDEMPOTENCY_LOCK:
+        cached = _IDEMPOTENCY_CACHE.get(cache_key)
+    if cached:
+        if cached[0] != body_hash:
+            return JSONResponse(status_code=409, content={"detail": "Idempotency-Key 与请求体不一致"})
+        return Response(content=cached[3], status_code=cached[1], headers=cached[2], media_type="application/json")
+    response = await call_next(request)
+    chunks = [chunk async for chunk in response.body_iterator]
+    response_body = b"".join(chunks)
+    if response.status_code < 500:
+        headers = {
+            name: value for name, value in response.headers.items()
+            if name.lower() in {"content-type", "etag", "location"}
+        }
+        with _IDEMPOTENCY_LOCK:
+            _IDEMPOTENCY_CACHE[cache_key] = (body_hash, response.status_code, headers, response_body)
+    return Response(
+        content=response_body,
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        media_type=response.media_type,
+    )
 
 
 def _require_role(role: Optional[str], *allowed_roles: str) -> str:

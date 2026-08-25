@@ -235,7 +235,7 @@ class TestVersionedApi:
         planner = control_module.build_local_session_token("scenario_operator", int(time.time()) + 300)
         response = await client.post(
             "/api/v1/scenarios/inventory-latched-5xx@1/run",
-            headers={"Authorization": planner},
+            headers={"Authorization": planner, "Idempotency-Key": "csrf-test-key-001"},
         )
         assert response.status_code == 403
         assert "CSRF" in response.json()["detail"]
@@ -249,9 +249,56 @@ class TestVersionedApi:
         ).hexdigest()
         response = await client.post(
             "/api/v1/scenarios/inventory-latched-5xx@1/run",
-            headers={"Authorization": session, "X-CSRF-Token": csrf},
+            headers={
+                "Authorization": session,
+                "X-CSRF-Token": csrf,
+                "Idempotency-Key": "csrf-test-key-002",
+            },
         )
         assert response.status_code == 202
+
+    async def test_full_v1_mutation_requires_idempotency_key(self, client, monkeypatch):
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+        session = control_module.build_local_session_token("scenario_operator", int(time.time()) + 300)
+        csrf = hmac.new(
+            b"test-session-secret", f"csrf:{session}".encode(), hashlib.sha256
+        ).hexdigest()
+        response = await client.post(
+            "/api/v1/scenarios/inventory-latched-5xx@1/run",
+            headers={"Authorization": session, "X-CSRF-Token": csrf},
+        )
+        assert response.status_code == 400
+        assert "Idempotency-Key" in response.json()["detail"]
+
+    async def test_full_v1_idempotency_replays_and_rejects_body_conflict(self, client, monkeypatch):
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+        session = control_module.build_local_session_token("system", int(time.time()) + 300)
+        csrf = hmac.new(
+            b"test-session-secret", f"csrf:{session}".encode(), hashlib.sha256
+        ).hexdigest()
+        headers = {
+            "Authorization": session,
+            "X-CSRF-Token": csrf,
+            "Idempotency-Key": "incident-create-key-001",
+        }
+        payload = {}
+        path = "/api/v1/scenarios/inventory-latched-5xx@1/run"
+        headers["Authorization"] = control_module.build_local_session_token("scenario_operator", int(time.time()) + 300)
+        headers["X-CSRF-Token"] = hmac.new(
+            b"test-session-secret", f"csrf:{headers['Authorization']}".encode(), hashlib.sha256
+        ).hexdigest()
+        first = await client.post(path, headers=headers, json=payload)
+        second = await client.post(path, headers=headers, json=payload)
+        assert first.status_code == second.status_code == 202
+        assert first.json() == second.json()
+        conflict = await client.post(
+            path,
+            headers=headers,
+            json={"unexpected": True},
+        )
+        assert conflict.status_code == 409
 
 
 @pytest.mark.asyncio
