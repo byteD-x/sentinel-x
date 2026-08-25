@@ -69,6 +69,11 @@
 
 local-only 身份不能由客户端 header 提供。未来 OIDC 增加新的配置组，不复用 session signing key。
 
+Action Gateway full profile 还要求非空 `SENTINEL_SERVICE_IDENTITY_SECRET`。Control
+API 调用 `/api/actions` 时发送 `X-Sentinel-Service-Name: control-api`、当前 Unix
+时间戳和 `sha256=HMAC(secret, "control-api:" + timestamp)`；时间窗为 300 秒。该
+签名是当前本地服务身份边界，不替代集群 TokenReview/mTLS。
+
 ## 6. 数据库与 Temporal
 
 | 变量 | 默认/必填 | 敏感 | 规则 |

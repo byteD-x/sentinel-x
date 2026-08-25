@@ -105,7 +105,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | P0 | 页面展示的证据、恢复和执行结果部分来自 fixture/模拟数据 | 用户可能把演示结果误认为真实观测结论 | 所有页面统一显示 `fixture/live/replay`、profile 和数据新鲜度；真实数据未接入时禁用“已恢复”强语义 |
 | P0 | 角色由 `X-Sentinel-Role` 本地 header 门控 | 任何能调用本地 API 的人都可能伪造角色 | light 保持 local-only 明示；full 实现服务端会话/OIDC、CSRF、职责分离和审计身份 |
 | P0 | `[部分完成]` Action Gateway 已有受控 fake K8s 状态变化和失败注入，但默认不连接真实目标，SLO 验证仅接受受控样本 | 用户无法证明动作真的改变业务状态 | 先将 fake K8s 接入隔离 full profile，再接 kind/k3d；验证必须读取真实 observed window |
-| P0 | `[部分完成]` Gateway 已从独立 ApprovalStore 读取不可变记录，并校验 namespace/kind/name/UID/generation、expiry、hash；SQLite backend 已支持跨连接原子消费 | PostgreSQL 权威审批、TokenReview/mTLS、跨服务事务和真实目标状态仍未完成 | 接入 PostgreSQL 专用 DB role、服务身份校验和真实目标 UID/generation 读取 |
+| P0 | `[部分完成]` Gateway 已从独立 ApprovalStore 读取不可变记录，并校验 namespace/kind/name/UID/generation、expiry、hash；SQLite backend 已支持跨连接原子消费，full profile 已增加带时间窗的 control-api 服务签名 | PostgreSQL 专用 DB role、正式 TokenReview/mTLS、跨服务事务和真实目标状态仍未完成 | 接入集群服务身份、真实目标 UID/generation 读取和跨服务事务 |
 | P1 | 事故回放目前主要是内存/SQLite 快照，导出包和持久 SSE 仍未完成 | 刷新、重启、复盘和跨人协作可信度不足 | PostgreSQL timeline/outbox + SSE gap/reconnect + 脱敏事故包 hash |
 | P1 | `[部分完成]` LocalExerciseWorkflow 已将审批决定与 action/recovery 推进分离，SLO 验证要求观测样本；真实审批投影仍未完全接入 | fixture 或受控样本不能证明业务真实恢复 | 终态只能由 Gateway 执行结果协调和真实 SLO VerificationResult 推进，动作成功与恢复成功分离 |
 | P1 | 缺少用户级过滤、搜索、证据新鲜度和“为什么升级人工”的统一解释 | 故障多时认知负担高 | 先补状态/严重度/服务/时间过滤、稳定拒绝码和统一升级原因，不扩展无关图表 |

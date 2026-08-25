@@ -5,6 +5,7 @@ Action Gateway 测试 — 覆盖完整校验链和安全边界。
 import hashlib
 import hmac
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -120,6 +121,31 @@ class TestHappyPath:
     async def test_restart_deployment_succeeds(self, client):
         resp = await client.post("/api/actions", json=_make_request())
         assert resp.status_code == 202
+
+    async def test_full_profile_requires_service_identity(self, client, monkeypatch):
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setenv("SENTINEL_SERVICE_IDENTITY_SECRET", "service-secret")
+        response = await client.post("/api/actions", json=_make_request())
+        assert response.status_code == 401
+        assert "服务身份" in response.json()["detail"]
+
+    async def test_full_profile_accepts_fresh_service_identity(self, client, monkeypatch):
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setenv("SENTINEL_SERVICE_IDENTITY_SECRET", "service-secret")
+        timestamp = str(int(time.time()))
+        signature = "sha256=" + hmac.new(
+            b"service-secret", f"control-api:{timestamp}".encode(), hashlib.sha256
+        ).hexdigest()
+        response = await client.post(
+            "/api/actions",
+            headers={
+                "X-Sentinel-Service-Name": "control-api",
+                "X-Sentinel-Service-Timestamp": timestamp,
+                "X-Sentinel-Service-Signature": signature,
+            },
+            json=_make_request(),
+        )
+        assert response.status_code == 202
 
     async def test_scale_deployment_succeeds(self, client):
         resp = await client.post("/api/actions", json=_make_request(

@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -152,6 +153,38 @@ class HealthResponse(BaseModel):
     actions_enabled: bool = False
     registered_runbooks: int = 0
     profile: str = "light"
+
+
+SERVICE_IDENTITY_CLOCK_SKEW_SECONDS = 300
+
+
+def _service_identity_error(
+    *,
+    service_name: str | None,
+    timestamp: str | None,
+    signature: str | None,
+) -> str | None:
+    """full profile 的最小服务身份契约；正式 TokenReview 仍由集群适配器提供。"""
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        return None
+    secret = os.getenv("SENTINEL_SERVICE_IDENTITY_SECRET", "")
+    if not secret:
+        return "full profile 缺少服务身份密钥"
+    if service_name != "control-api" or not timestamp or not signature:
+        return "缺少 control-api 服务身份声明"
+    try:
+        issued_at = int(timestamp)
+    except ValueError:
+        return "服务身份时间戳无效"
+    if abs(int(time.time()) - issued_at) > SERVICE_IDENTITY_CLOCK_SKEW_SECONDS:
+        return "服务身份已过期"
+    canonical = f"{service_name}:{timestamp}"
+    expected = "sha256=" + hmac.new(
+        secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return "服务身份签名无效"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -689,6 +722,8 @@ gate = ActionGate(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if os.getenv("SENTINEL_PROFILE", "light") == "full":
+        if not os.getenv("SENTINEL_SERVICE_IDENTITY_SECRET"):
+            raise RuntimeError("Action Gateway full profile 缺少服务身份密钥")
         connection = approval_store._connect
         database = connection()
         try:
@@ -718,7 +753,12 @@ async def health():
 
 
 @app.post("/api/actions", status_code=status.HTTP_202_ACCEPTED)
-async def submit_action(req: ActionSubmitRequest):
+async def submit_action(
+    req: ActionSubmitRequest,
+    service_name: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Name"),
+    service_timestamp: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Timestamp"),
+    service_signature: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Signature"),
+):
     """
     提交已审批的动作。
 
@@ -726,6 +766,11 @@ async def submit_action(req: ActionSubmitRequest):
     Runbook 存在 → MVP 启用 → R1 合法 → 目标白名单
     → 参数合规 → Plan hash 一致 → 幂等键唯一
     """
+    identity_error = _service_identity_error(
+        service_name=service_name, timestamp=service_timestamp, signature=service_signature
+    )
+    if identity_error:
+        raise HTTPException(status_code=401, detail=identity_error)
     async with store.claim_lock:
         allowed, reason, runbook, approval = gate.validate(req)
         if not allowed:
