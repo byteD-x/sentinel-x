@@ -41,7 +41,8 @@
 - 场景 Runner：`python scripts/run_scenario_matrix.py --cycles 3` 已对固定六场景执行 18 次隔离注入/观测/cleanup，并在每轮检查环境 CLEAN；backend 为 in-memory fixture。
 - 固定攻击集：`python scripts/run_security_attack_set.py` 记录 10 个样本、危险拦截率、合法 R1 接受率和 dataset hash；这是 policy/参数静态门禁，不替代 Kubernetes RBAC/网络攻击测试。
 - 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。Control API 另有受 session 门控的 light 事故 JSON 导出，递归脱敏并返回内容 SHA-256，不等同于持久异步事故包。
-- 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈与 Kubernetes 权限清单静态检查及本地 fixture 证据包。
+- Action Gateway PostgreSQL 审批消费切片：`PostgresApprovalStore` 从 `approval_requests + remediation_plans` 读取不可变审批声明，`consume` 使用状态/过期/额度条件更新；本机 PostgreSQL 临时库验证读取、目标身份映射、一次消费、重复消费拒绝和重启后不可再消费。full profile 缺少 PostgreSQL URL/驱动/健康检查失败时 fail-closed。仍未完成 TokenReview、mTLS/服务身份和 ActionExecution PostgreSQL 跨服务事务。
+- 限制：full Kubernetes/observability E2E、TokenReview/服务身份和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈与 Kubernetes 权限清单静态检查及本地 fixture 证据包。
 
 ## 2. Claim 台账
 

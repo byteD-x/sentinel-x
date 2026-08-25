@@ -263,6 +263,116 @@ class SQLiteApprovalStore:
             self._connection.close()
 
 
+class PostgresApprovalStore:
+    """full profile 的 PostgreSQL 权威审批读取与一次性消费边界。"""
+
+    def __init__(self, connect: Any):
+        if not callable(connect):
+            raise TypeError("connect 必须是可调用的连接工厂")
+        self._connect = connect
+
+    @staticmethod
+    def _record(row: tuple[Any, ...]) -> ApprovalRecord:
+        parameters = row[5]
+        if isinstance(parameters, str):
+            parameters = json.loads(parameters)
+        return ApprovalRecord(
+            approval_id=str(row[0]),
+            incident_id=str(row[1]),
+            runbook_ref=f"{row[2]}@{row[3]}",
+            target=str(row[4]),
+            parameters=dict(parameters or {}),
+            plan_hash=str(row[6]),
+            risk_level=RiskLevel(str(row[7])),
+            audience="sentinel-action-gateway",
+            expires_at=row[8],
+            target_identity=TargetIdentity(
+                namespace=str(row[9]), kind=str(row[10]), name=str(row[11]),
+                uid=str(row[12]), generation=int(row[13]),
+            ),
+            status=str(row[14]),
+            max_executions=int(row[15]),
+        )
+
+    def get(self, approval_id: str) -> ApprovalRecord | None:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT ar.id, ar.incident_id, rp.runbook_id, rp.runbook_version,
+                           rp.target_name, rp.parameters, ar.plan_hash, ar.risk_level,
+                           ar.expires_at, rp.target_namespace, rp.target_kind,
+                           rp.target_name, rp.target_uid, rp.target_observed_generation,
+                           ar.status, ar.max_executions
+                    FROM approval_requests ar
+                    JOIN remediation_plans rp ON rp.id = ar.plan_id
+                    WHERE ar.id = %s
+                    """,
+                    (approval_id,),
+                )
+                row = cursor.fetchone()
+                return self._record(row) if row else None
+        finally:
+            connection.close()
+
+    def consumed_count(self, approval_id: str) -> int:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT consumed_count FROM approval_requests WHERE id = %s",
+                    (approval_id,),
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        finally:
+            connection.close()
+
+    def is_consumable(self, record: ApprovalRecord) -> bool:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT status, consumed_count, max_executions, expires_at
+                    FROM approval_requests WHERE id = %s
+                    """,
+                    (record.approval_id,),
+                )
+                row = cursor.fetchone()
+                return bool(
+                    row
+                    and row[0] == "approved"
+                    and int(row[1]) < int(row[2])
+                    and row[3] > datetime.now(row[3].tzinfo)
+                )
+        finally:
+            connection.close()
+
+    def consume(self, record: ApprovalRecord) -> bool:
+        connection = self._connect()
+        try:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE approval_requests
+                        SET consumed_count = consumed_count + 1
+                        WHERE id = %s AND status = 'approved'
+                          AND consumed_count < max_executions
+                          AND expires_at > now()
+                        """,
+                        (record.approval_id,),
+                    )
+                    return cursor.rowcount == 1
+        finally:
+            connection.close()
+
+    def clear(self) -> None:
+        raise RuntimeError("full profile PostgreSQL 审批记录不可清空")
+
+
 def build_approval_store(path: str | Path | None = None) -> ApprovalStore | SQLiteApprovalStore:
     """按 profile 选择存储；未配置路径时保持 light 内存行为。"""
 
