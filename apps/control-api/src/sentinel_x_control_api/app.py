@@ -890,6 +890,17 @@ class PostgresStore(InMemoryStore):
             return None
         return self._hydrate(record) if record else None
 
+    def get_timeline(self, incident_id: str, after_sequence: int = 0) -> list[TimelineEvent]:
+        try:
+            record = self.repository.get_incident(UUID(incident_id))
+        except ValueError:
+            return []
+        if record is None:
+            return []
+        # 每次读取都以 PostgreSQL 为准，避免 SSE 轮询只看到进程内旧缓存。
+        hydrated = self._hydrate(record)
+        return [event for event in hydrated.timeline if event.sequence > after_sequence]
+
     def create_incident(self, data: IncidentCreate) -> StoredIncident:
         existing = self.find_by_fingerprint(data.alert_source.fingerprint)
         record = self.repository.create_incident(

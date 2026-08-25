@@ -198,6 +198,18 @@ def test_postgres_store_rebuilds_incident_and_timeline_after_restart():
         assert recovered.status == control_app.IncidentStatus.TRIAGING
         assert [event.sequence for event in recovered.timeline] == [1, 2, 3]
         assert recovered.timeline[-1].event_type == "incident.status_changed"
+
+        repository.append_event(
+            incident_id=record.id,
+            event_type="hypothesis.generated",
+            actor_type="INVESTIGATOR",
+            payload={"source": "external-connection"},
+            workflow_event_id="restart-event-4",
+        )
+        events = restored.get_timeline(str(record.id), after_sequence=3)
+        assert len(events) == 1
+        assert events[0].event_type == "hypothesis.generated"
+        assert events[0].payload == {"source": "external-connection"}
     finally:
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
         admin.close()
