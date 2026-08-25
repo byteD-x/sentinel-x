@@ -67,6 +67,7 @@ from sentinel_x_control_api.local_workflow import LocalExerciseWorkflow
 from sentinel_x_control_api.postgres import apply_migrations, check_postgres_health
 from sentinel_x_control_api.postgres_dispatcher import PostgresOutboxDispatcher
 from sentinel_x_control_api.postgres_idempotency import PostgresIdempotencyStore
+from sentinel_x_control_api.postgres_replay import PostgresReplayStore
 from sentinel_x_control_api.postgres_repository import PostgresIncidentRepository
 
 
@@ -1107,6 +1108,7 @@ _ALERT_INGRESS_REPLAY_LOCK = threading.Lock()
 _IDEMPOTENCY_CACHE: dict[tuple[str, str, str], tuple[str, int, dict[str, str], bytes]] = {}
 _IDEMPOTENCY_LOCK = threading.Lock()
 idempotency_store: PostgresIdempotencyStore | None = None
+replay_store: PostgresReplayStore | None = None
 LOCAL_SESSION_SIGNING_KEY = os.getenv("SENTINEL_LOCAL_SESSION_SIGNING_KEY")
 API_VERSION = "v1"
 
@@ -1119,9 +1121,10 @@ API_VERSION = "v1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期。"""
-    global idempotency_store, store
+    global idempotency_store, replay_store, store
     dispatcher_task = None
     idempotency_store = None
+    replay_store = None
     if os.getenv("SENTINEL_PROFILE", "light") == "full":
         database_url = os.getenv("DATABASE_URL", "")
         if not database_url:
@@ -1139,6 +1142,7 @@ async def lifespan(app: FastAPI):
             idempotency_store = PostgresIdempotencyStore(
                 lambda: psycopg.connect(database_url)
             )
+            replay_store = PostgresReplayStore(lambda: psycopg.connect(database_url))
             dispatcher = PostgresOutboxDispatcher(
                 lambda: psycopg.connect(database_url), store.publish_outbox_event
             )
@@ -1322,6 +1326,14 @@ async def _verify_alert_ingress(request: Request) -> None:
     ).hexdigest()
     if not hmac.compare_digest(signature[7:], expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 签名无效")
+
+    if replay_store is not None:
+        first_seen = await asyncio.to_thread(
+            replay_store.claim, nonce, ALERT_INGRESS_REPLAY_TTL_SECONDS
+        )
+        if not first_seen:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 请求已重放")
+        return
 
     now = time.time()
     with _ALERT_INGRESS_REPLAY_LOCK:

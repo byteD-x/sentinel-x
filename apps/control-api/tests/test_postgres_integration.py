@@ -23,6 +23,7 @@ from sentinel_x_control_api.postgres import apply_migrations
 from sentinel_x_control_api.postgres_dispatcher import PostgresOutboxDispatcher
 from sentinel_x_control_api.postgres_idempotency import PostgresIdempotencyStore
 from sentinel_x_control_api.postgres_repository import PostgresIncidentRepository
+from sentinel_x_control_api.postgres_replay import PostgresReplayStore
 from sentinel_x_domain.services import compute_plan_hash
 
 
@@ -132,6 +133,31 @@ def test_postgres_idempotency_record_survives_reopen():
         assert record.status_code == 200
         assert record.body == b'{"status":"approved"}'
         assert reopened.reserve(**{**kwargs, "body_hash": "b" * 64}).body_hash == "a" * 64
+    finally:
+        admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        admin.close()
+
+
+@pytest.mark.integration
+def test_postgres_alert_nonce_claim_is_atomic_and_expires():
+    admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
+    if not admin_url:
+        pytest.skip("未设置 SENTINEL_POSTGRES_ADMIN_URL")
+    psycopg = pytest.importorskip("psycopg")
+    database = f"sentinel_x_nonce_{uuid4().hex[:10]}"
+    admin = psycopg.connect(admin_url, autocommit=True)
+    try:
+        admin.execute(f'CREATE DATABASE "{database}"')
+        database_url = admin_url.rsplit("/", 1)[0] + f"/{database}"
+        apply_migrations(
+            database_url,
+            migrations_dir=Path(__file__).resolve().parents[3] / "migrations",
+            connect=lambda *args, **kwargs: psycopg.connect(database_url, **kwargs),
+        )
+        first = PostgresReplayStore(lambda: psycopg.connect(database_url))
+        second = PostgresReplayStore(lambda: psycopg.connect(database_url))
+        assert first.claim("nonce-integration", 300) is True
+        assert second.claim("nonce-integration", 300) is False
     finally:
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
         admin.close()

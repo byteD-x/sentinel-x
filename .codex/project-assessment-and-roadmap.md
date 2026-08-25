@@ -24,7 +24,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 - `[已完成]` 修复 `pytest -q` 的仓库根路径问题，并将 `make test-e2e` 统一为 `python -m pytest`。
 - `[已完成]` 新增 `.github/workflows/quality.yml`，覆盖 Python 测试/轻量 Ruff、Web Console、Terminal Console。
-- `[已完成]` Alert Ingress 增加时间戳 + nonce + HMAC，有界 replay cache 和重复 nonce 拒绝。
+- `[已完成]` Alert Ingress 增加时间戳 + nonce + HMAC，有界 replay cache 和重复 nonce 拒绝；full profile 已将 nonce claim 升级为 PostgreSQL 唯一约束与原子事务，真实 Alertmanager/观测栈联调仍未完成。
 - `[已完成]` Control API 创建审批时重新执行 MVP policy、风险等级和 canonical plan hash 校验。
 - `[已完成]` 场景启动统一进入 `LocalExerciseWorkflow`；审批决定只记录用户意图，执行/验证由编排器推进；API 启动时恢复未完成 checkpoint。
 - `[已完成]` 对本地快照中的 orphan checkpoint 做安全清理，避免旧测试状态阻塞启动。
@@ -77,7 +77,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | --- | --- | --- | --- |
 | P0 | light、full、fixture、真实能力的验收边界分散在多份文档 | 容易出现“代码存在=功能完成”的误判 | 建立单一 Release Readiness 看板，每项只允许 `DESIGNED/IMPLEMENTED/TESTED/MEASURED` 一种状态 |
 | P0 | `[部分完成]` Temporal 已有单场景可验收垂直切片，但 PostgreSQL、Kubernetes、观测栈仍在关键路径 | 剩余 full profile 依赖较多，仍可能晚期暴露集成问题 | 以现有 `inventory-latched-5xx@1` 为基线补 PostgreSQL projection/outbox 和 fake K8s，再扩展六场景 |
-| P0 | `[已完成]` Alert Ingress 已有时间窗、nonce、HMAC 和有界 replay cache；Control API 已服务器端重算 policy/plan hash | 原有重放和错误 R1 风险已在 light 测试中收敛 | 继续补正式 webhook 契约、远端 CI 和 full profile 证据 |
+| P0 | `[已完成]` Alert Ingress 已有时间窗、nonce、HMAC 和有界 replay cache；full profile 已用 PostgreSQL 唯一约束与原子事务持久化 nonce claim；Control API 已服务器端重算 policy/plan hash | 原有重放和错误 R1 风险已在 light 测试中收敛 | 继续补正式 webhook 契约、远端 CI 和 full profile 证据 |
 | P1 | `[已完成]` 已建立 CI 自动门禁 | 本地质量可以持续检查，但尚无远端 CI run 证据 | 保留 Python/Web/Terminal 门禁，后接安全和 E2E |
 | P1 | 没有实时交付指标 | 无法判断是否在收敛 | 每周只跟踪 5 个指标：D2 门禁关闭数、阻断缺陷数、full E2E 通过数、脏环境次数、证据包完整率 |
 | P1 | 尚无版本化演示/benchmark 产物 | 面试或评审结果不可复查 | 固定 commit、scenario、policy、prompt、model、dataset、profile 和报告 hash |
@@ -160,7 +160,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - `[已完成]` 先实现 `inventory-latched-5xx@1` 的 Temporal durable thin slice，不扩展场景。
 - `[已完成]` Temporal 已注册真实 Workflow、Activity、Signal/审批等待和 retry；full Worker 不再使用空实现降级。
 - `[已完成（本机集成）]` PostgreSQL 已完成 Incident、Timeline、Approval、ActionExecution、VerificationResult、outbox 和幂等记录 migration，并通过本机 PostgreSQL up/down/reapply 与持久化测试；远端 CI、真实 crash/restart 对账仍未完成。
-- 将 Alert Ingress 的 fingerprint/nonce 去重、ApprovalDecision 一次决定和 ActionExecution 幂等键放入数据库唯一约束/事务；不要让 API 继续复制一套独立状态转换表。
+- `[部分完成]` Alert Ingress nonce 去重、ApprovalDecision 一次决定和 ActionExecution 幂等键已分别接入数据库唯一约束/事务；fingerprint/Incident 全链路与 ActionExecution 跨服务事务仍需收敛，不要让 API 继续复制一套独立状态转换表。
 - 用 outbox/唯一约束保证 command、审批决定、动作登记和投影可重试；加入 Workflow/DB 对账。
 - API 先收敛 `/api/v1`，同时保留兼容层的明确弃用策略。
 
