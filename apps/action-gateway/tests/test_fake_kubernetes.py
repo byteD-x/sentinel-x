@@ -33,6 +33,15 @@ def test_gateway_app_can_select_fake_k8s_executor(monkeypatch):
     assert deployment.replicas == deployment.ready_replicas == 3
 
 
+def test_full_profile_rejects_fixture_executor(monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROFILE", "full")
+    monkeypatch.setenv("SENTINEL_EXECUTION_MODE", "fixture")
+    import sentinel_x_action_gateway.app as gateway_app
+
+    with pytest.raises(RuntimeError, match="禁止 fixture"):
+        gateway_app._build_executor()
+
+
 def _identity(generation: int = 1) -> TargetIdentity:
     return TargetIdentity(
         namespace="demo-shop",

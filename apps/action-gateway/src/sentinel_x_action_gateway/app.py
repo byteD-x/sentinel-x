@@ -686,7 +686,14 @@ approval_store = _build_runtime_approval_store()
 
 def _build_executor() -> ActionExecutor:
     """按 profile 选择执行器；fake-k8s 只允许显式隔离环境开启。"""
-    if os.getenv("SENTINEL_EXECUTION_MODE", "fixture") != "fake-k8s":
+    profile = os.getenv("SENTINEL_PROFILE", "light")
+    mode = os.getenv("SENTINEL_EXECUTION_MODE", "fixture")
+    if profile == "full" and mode != "fake-k8s":
+        raise RuntimeError(
+            "Action Gateway full profile 禁止 fixture 执行器；请显式配置隔离 fake-k8s "
+            "或接入受支持的真实 Kubernetes 适配器"
+        )
+    if mode != "fake-k8s":
         return FixtureActionExecutor()
     api = FakeKubernetesApi()
     for name in ("order-api", "inventory-api", "payment-api", "order-worker", "inventory-worker", "payment-worker"):

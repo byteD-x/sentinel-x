@@ -60,7 +60,7 @@
 
 ### 环境与功能
 
-- full profile 冷启动成功，版本/digest/资源记录完整。
+- full profile 冷启动必须显式选择受控 `fake-k8s` 或真实适配器；fixture 执行器在 full profile 启动即拒绝。当前 fake-k8s 仅用于隔离演练，不代表真实集群写入。
 - 六场景连续注入/cleanup，环境 CLEAN。
 - Pod 自动恢复、capacity scale、latched 5xx restart 三条路径因果可区分。
 - Redis/DB lock/bad deployment 正确升级且无越权动作。
