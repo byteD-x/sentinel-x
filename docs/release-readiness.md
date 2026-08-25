@@ -46,7 +46,7 @@
 
 - Control API 已提供 `/api/v1`、local-only 短期 HMAC session、ETag/If-Match 和 SQLite outbox；仍缺 OIDC/CSRF、PostgreSQL 权威投影和跨服务事务。
 - Action Gateway 已默认 fail-closed，并校验本地 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份和一次性消费；SQLite local backend 已覆盖重启恢复与 SQL 条件更新原子消费，但仍未实现 PostgreSQL 绑定审批读取、TokenReview 和跨服务事务。
-- Alert Ingress 已校验时间戳、nonce 和 HMAC，并在 local profile 使用有界 replay cache；body 上限和正式 Alertmanager webhook 契约仍未实现。
+- Alert Ingress 已校验时间戳、nonce、HMAC 和有界 body，并提供版本化 Alertmanager webhook 转换；仍未完成 PostgreSQL 去重事务和真实 Alertmanager/观测栈联调。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
 - light Workflow fixture 的动作执行仍是模拟路径，但恢复结论已改为读取受控观测样本；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal、Worker restart 和 history replay。
 - full 多场景 Temporal replay、PostgreSQL migration/projection 和 full observability E2E 未完成；当前 outbox 仅为 local SQLite 可恢复切片。
