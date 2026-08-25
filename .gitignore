@@ -30,6 +30,7 @@ coverage/
 tmp/
 artifacts/
 reports/raw/
+evidence/
 .codex/visual-qa/
 apps/web-console/.codex/
 *.log
