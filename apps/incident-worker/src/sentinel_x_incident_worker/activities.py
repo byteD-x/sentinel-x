@@ -15,6 +15,11 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
+from sentinel_x_incident_worker.reconciliation import (
+    ProjectionCheckpoint,
+    reconcile_checkpoint,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,6 +29,56 @@ def _require_real_full_adapter(capability: str) -> None:
         raise RuntimeError(
             f"full profile 未配置真实 {capability} adapter；禁止使用 fixture Activity"
         )
+
+
+async def reconcile_postgres_projection(
+    *,
+    incident_id: str,
+    expected: dict,
+    database_url: str | None = None,
+) -> dict:
+    """Activity：从 PostgreSQL 读取投影 checkpoint 并 fail-closed 对账。
+
+    ``database_url`` 仅供测试注入；生产 Activity 从 Worker 环境读取，避免
+    凭据进入 Temporal Workflow history。
+    """
+    url = database_url or os.getenv("DATABASE_URL", "")
+    if not url.startswith(("postgresql://", "postgresql+")):
+        raise RuntimeError("PostgreSQL reconciliation 需要 DATABASE_URL")
+
+    def read_checkpoint() -> dict:
+        try:
+            psycopg = __import__("psycopg")
+        except ImportError as exc:
+            raise RuntimeError("PostgreSQL reconciliation 需要 psycopg") from exc
+        connection = psycopg.connect(url)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT workflow_run_id, workflow_event_id, status, projection_version
+                    FROM incidents WHERE id = %s
+                    """,
+                    (incident_id,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("PostgreSQL projection 中不存在事故")
+                return {
+                    "workflow_run_id": row[0] or "",
+                    "workflow_event_id": row[1] or "",
+                    "status": str(row[2]),
+                    "projection_version": int(row[3]),
+                }
+        finally:
+            connection.close()
+
+    observed = await asyncio.to_thread(read_checkpoint)
+    reconcile_checkpoint(
+        ProjectionCheckpoint(**expected),
+        ProjectionCheckpoint(**observed),
+    )
+    return observed
 
 
 # ---------------------------------------------------------------------------
