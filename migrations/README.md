@@ -19,6 +19,8 @@ The runner and unit tests are implemented. When PostgreSQL is available,
 performs an isolated up/down/reapply and constraint check, then removes its
 temporary database. Runtime domain repository, projection/dispatcher,
 Temporal reconciliation, and live application integration remain separate work
-items.
+items. Full-profile mutation idempotency is persisted in
+`idempotency_records`; a crash between the side effect and response completion
+still requires reconciliation.
 The local profile does not implement this PostgreSQL schema and does not silently
 fall back to it when the full-profile database is unavailable.

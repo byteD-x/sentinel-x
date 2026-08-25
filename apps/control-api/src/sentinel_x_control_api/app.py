@@ -66,6 +66,7 @@ from sentinel_x_control_api.local_state import LocalStateSnapshot
 from sentinel_x_control_api.local_workflow import LocalExerciseWorkflow
 from sentinel_x_control_api.postgres import apply_migrations, check_postgres_health
 from sentinel_x_control_api.postgres_dispatcher import PostgresOutboxDispatcher
+from sentinel_x_control_api.postgres_idempotency import PostgresIdempotencyStore
 from sentinel_x_control_api.postgres_repository import PostgresIncidentRepository
 
 
@@ -1105,6 +1106,7 @@ _ALERT_INGRESS_REPLAY_CACHE: dict[str, float] = {}
 _ALERT_INGRESS_REPLAY_LOCK = threading.Lock()
 _IDEMPOTENCY_CACHE: dict[tuple[str, str, str], tuple[str, int, dict[str, str], bytes]] = {}
 _IDEMPOTENCY_LOCK = threading.Lock()
+idempotency_store: PostgresIdempotencyStore | None = None
 LOCAL_SESSION_SIGNING_KEY = os.getenv("SENTINEL_LOCAL_SESSION_SIGNING_KEY")
 API_VERSION = "v1"
 
@@ -1117,8 +1119,9 @@ API_VERSION = "v1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期。"""
-    global store
+    global idempotency_store, store
     dispatcher_task = None
+    idempotency_store = None
     if os.getenv("SENTINEL_PROFILE", "light") == "full":
         database_url = os.getenv("DATABASE_URL", "")
         if not database_url:
@@ -1133,6 +1136,9 @@ async def lifespan(app: FastAPI):
             )
             store = PostgresStore(repository)
             local_workflow.store = store
+            idempotency_store = PostgresIdempotencyStore(
+                lambda: psycopg.connect(database_url)
+            )
             dispatcher = PostgresOutboxDispatcher(
                 lambda: psycopg.connect(database_url), store.publish_outbox_event
             )
@@ -1206,6 +1212,51 @@ async def require_full_idempotency(request: Request, call_next):
     actor = request.headers.get("Authorization", "")
     cache_key = (actor, request.url.path, key)
     body_hash = hashlib.sha256(body).hexdigest()
+    if idempotency_store is not None:
+        record = await asyncio.to_thread(
+            idempotency_store.reserve,
+            actor_key=actor,
+            route=request.url.path,
+            idempotency_key=key,
+            body_hash=body_hash,
+        )
+        if record is not None:
+            if record.body_hash != body_hash:
+                return JSONResponse(status_code=409, content={"detail": "Idempotency-Key 与请求体不一致"})
+            if record.status_code == 0:
+                return JSONResponse(status_code=409, content={"detail": "相同请求正在处理中，请重试"})
+            return Response(
+                content=record.body or b"{}",
+                status_code=record.status_code,
+                headers=record.headers,
+                media_type="application/json",
+            )
+        response = await call_next(request)
+        chunks = [chunk async for chunk in response.body_iterator]
+        response_body = b"".join(chunks)
+        headers = {
+            name: value for name, value in response.headers.items()
+            if name.lower() in {"content-type", "etag", "location"}
+        }
+        if response.status_code < 500:
+            await asyncio.to_thread(
+                idempotency_store.complete,
+                actor_key=actor, route=request.url.path, idempotency_key=key,
+                body_hash=body_hash, status_code=response.status_code,
+                headers=headers, body=response_body,
+            )
+        else:
+            await asyncio.to_thread(
+                idempotency_store.release,
+                actor_key=actor, route=request.url.path,
+                idempotency_key=key, body_hash=body_hash,
+            )
+        return Response(
+            content=response_body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+        )
     with _IDEMPOTENCY_LOCK:
         cached = _IDEMPOTENCY_CACHE.get(cache_key)
     if cached:

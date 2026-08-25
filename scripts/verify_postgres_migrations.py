@@ -82,14 +82,14 @@ def _assert_schema(admin_url: str, database: str) -> dict[str, int]:
       (SELECT count(*) FROM information_schema.tables
        WHERE table_schema = 'public' AND table_name IN
        ('incidents','remediation_plans','timeline_events','approval_requests',
-        'approval_decisions','action_executions','verification_results','outbox_events')) AS table_count,
+        'approval_decisions','action_executions','verification_results','outbox_events','idempotency_records')) AS table_count,
       (SELECT count(*) FROM pg_trigger WHERE tgname IN
        ('timeline_events_immutable','approval_decisions_immutable')) AS trigger_count,
       (SELECT count(*) FROM pg_indexes WHERE indexname = 'incidents_active_fingerprint_uidx') AS index_count;
     """
     output = _psql(admin_url, database, "--tuples-only", "--no-align", "--command", query).stdout.strip()
     values = [int(value) for value in output.split("|")]
-    expected = {"table_count": 8, "trigger_count": 2, "index_count": 1}
+    expected = {"table_count": 9, "trigger_count": 2, "index_count": 1}
     actual = dict(zip(expected, values, strict=True))
     if actual != expected:
         raise VerificationError(f"schema 断言失败: {actual}，期望 {expected}")
@@ -157,17 +157,21 @@ def main() -> int:
     }
     try:
         _createdb(args.admin_url, database)
-        up = MIGRATIONS / "0001_domain.sql"
-        down = MIGRATIONS / "0001_domain.down.sql"
-        _psql(args.admin_url, database, "--file", str(up))
-        _psql(args.admin_url, database, "--file", str(up))
+        up = [MIGRATIONS / "0001_domain.sql", MIGRATIONS / "0002_idempotency.sql"]
+        down = [MIGRATIONS / "0002_idempotency.down.sql", MIGRATIONS / "0001_domain.down.sql"]
+        for migration in up:
+            _psql(args.admin_url, database, "--file", str(migration))
+        for migration in up:
+            _psql(args.admin_url, database, "--file", str(migration))
         report["checks"].append({"name": "up-idempotent", "passed": True})
         report["checks"].append({"name": "schema", "passed": True, "details": _assert_schema(args.admin_url, database)})
         _assert_constraints(args.admin_url, database)
         report["checks"].append({"name": "constraints-and-append-only", "passed": True})
-        _psql(args.admin_url, database, "--file", str(down))
+        for rollback in down:
+            _psql(args.admin_url, database, "--file", str(rollback))
         report["checks"].append({"name": "down", "passed": True})
-        _psql(args.admin_url, database, "--file", str(up))
+        for migration in up:
+            _psql(args.admin_url, database, "--file", str(migration))
         report["checks"].append({"name": "reapply", "passed": True})
         report["passed"] = True
     except VerificationError as exc:

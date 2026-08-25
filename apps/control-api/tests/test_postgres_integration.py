@@ -21,6 +21,7 @@ import sentinel_x_control_api.app as control_app
 from sentinel_x_control_api.app import AlertSource, IncidentCreate, InMemoryStore, PostgresStore
 from sentinel_x_control_api.postgres import apply_migrations
 from sentinel_x_control_api.postgres_dispatcher import PostgresOutboxDispatcher
+from sentinel_x_control_api.postgres_idempotency import PostgresIdempotencyStore
 from sentinel_x_control_api.postgres_repository import PostgresIncidentRepository
 from sentinel_x_domain.services import compute_plan_hash
 
@@ -90,6 +91,47 @@ def test_real_repository_and_outbox_dispatcher():
         }
         assert event.sequence == 2
         assert dispatcher.dispatch_once() == 0
+    finally:
+        admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        admin.close()
+
+
+@pytest.mark.integration
+def test_postgres_idempotency_record_survives_reopen():
+    admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
+    if not admin_url:
+        pytest.skip("未设置 SENTINEL_POSTGRES_ADMIN_URL")
+    psycopg = pytest.importorskip("psycopg")
+    database = f"sentinel_x_idem_{uuid4().hex[:10]}"
+    admin = psycopg.connect(admin_url, autocommit=True)
+    try:
+        admin.execute(f'CREATE DATABASE "{database}"')
+        database_url = admin_url.rsplit("/", 1)[0] + f"/{database}"
+        apply_migrations(
+            database_url,
+            migrations_dir=Path(__file__).resolve().parents[3] / "migrations",
+            connect=lambda *args, **kwargs: psycopg.connect(database_url, **kwargs),
+        )
+        kwargs = {
+            "actor_key": "Bearer session-1",
+            "route": "/api/v1/approval-requests/1/decisions",
+            "idempotency_key": "integration-idempotency-001",
+            "body_hash": "a" * 64,
+        }
+        first = PostgresIdempotencyStore(lambda: psycopg.connect(database_url))
+        assert first.reserve(**kwargs) is None
+        first.complete(
+            **kwargs,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body=b'{"status":"approved"}',
+        )
+        reopened = PostgresIdempotencyStore(lambda: psycopg.connect(database_url))
+        record = reopened.reserve(**kwargs)
+        assert record is not None
+        assert record.status_code == 200
+        assert record.body == b'{"status":"approved"}'
+        assert reopened.reserve(**{**kwargs, "body_hash": "b" * 64}).body_hash == "a" * 64
     finally:
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
         admin.close()

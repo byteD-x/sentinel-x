@@ -300,6 +300,54 @@ class TestVersionedApi:
         )
         assert conflict.status_code == 409
 
+    async def test_full_v1_postgres_idempotency_path_replays_response(self, client, monkeypatch):
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+
+        class FakePersistentIdempotency:
+            def __init__(self):
+                self.records = {}
+
+            def reserve(self, **kwargs):
+                key = (kwargs["actor_key"], kwargs["route"], kwargs["idempotency_key"])
+                existing = self.records.get(key)
+                if existing is None:
+                    self.records[key] = {"body_hash": kwargs["body_hash"], "status_code": 0}
+                    return None
+                return type("Record", (), {
+                    "body_hash": existing["body_hash"],
+                    "status_code": existing["status_code"],
+                    "headers": existing.get("headers", {}),
+                    "body": existing.get("body"),
+                })()
+
+            def complete(self, **kwargs):
+                key = (kwargs["actor_key"], kwargs["route"], kwargs["idempotency_key"])
+                self.records[key].update(
+                    body_hash=kwargs["body_hash"], status_code=kwargs["status_code"],
+                    headers=kwargs["headers"], body=kwargs["body"],
+                )
+
+            def release(self, **kwargs):
+                self.records.pop((kwargs["actor_key"], kwargs["route"], kwargs["idempotency_key"]), None)
+
+        persistent = FakePersistentIdempotency()
+        monkeypatch.setattr(control_module, "idempotency_store", persistent)
+        session = control_module.build_local_session_token("scenario_operator", int(time.time()) + 300)
+        csrf = hmac.new(
+            b"test-session-secret", f"csrf:{session}".encode(), hashlib.sha256
+        ).hexdigest()
+        headers = {
+            "Authorization": session,
+            "X-CSRF-Token": csrf,
+            "Idempotency-Key": "persistent-idempotency-001",
+        }
+        path = "/api/v1/scenarios/inventory-latched-5xx@1/run"
+        first = await client.post(path, headers=headers, json={})
+        second = await client.post(path, headers=headers, json={})
+        assert first.status_code == second.status_code == 202
+        assert first.json() == second.json()
+
     async def test_formal_approval_request_resource_contract(self, client, monkeypatch):
         monkeypatch.setenv("SENTINEL_PROFILE", "full")
         monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
