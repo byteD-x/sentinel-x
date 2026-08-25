@@ -1,8 +1,8 @@
 """PostgreSQL migration 与健康检查边界。
 
 该模块只负责连接和迁移元数据，不承载领域写入。领域事务、投影和
-outbox dispatcher 仍需在 repository 切片中接入；full profile 不允许在
-缺少驱动或数据库不可达时静默回退到 SQLite。
+outbox dispatcher 由 repository/应用生命周期显式接入；full profile 不允许
+在缺少驱动或数据库不可达时静默回退到 SQLite。
 """
 
 from __future__ import annotations
