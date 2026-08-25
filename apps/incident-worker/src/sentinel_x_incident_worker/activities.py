@@ -7,10 +7,13 @@
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import math
 import os
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
@@ -317,8 +320,14 @@ async def submit_action_to_gateway(
     parameters: dict,
     idempotency_key: str,
     approval_token: str,
+    plan_hash: str = "",
     audience: str = "sentinel-action-gateway",
     timeout_seconds: int = 120,
+    approval_id: str = "",
+    incident_id: str = "",
+    approval_expires_at: str = "",
+    target_identity: dict | None = None,
+    target_resource_version: str = "unknown",
 ) -> dict:
     """
     [Activity] 向 Action Gateway 提交已审批的动作。
@@ -331,35 +340,94 @@ async def submit_action_to_gateway(
     - audience 固定，防止 token 被重放到其他服务
     - approval_token 绑定到本次审批
     """
-    _require_real_full_adapter("Action Gateway")
-    await asyncio.sleep(0.5)
-
-    execution_id = str(uuid4())
-    return {
-        "execution_id": execution_id,
-        "status": "succeeded",
-        "before_state": f"{target}: 3 replicas, 2 unhealthy",
-        "after_state": f"{target}: 3 replicas, 3 healthy",
-        "output": f"Successfully executed {runbook_ref} on {target}",
-        "idempotency_key": idempotency_key,
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        await asyncio.sleep(0.5)
+        return {
+            "execution_id": str(uuid4()), "status": "succeeded",
+            "before_state": f"{target}: 3 replicas, 2 unhealthy",
+            "after_state": f"{target}: 3 replicas, 3 healthy",
+            "output": f"Successfully executed {runbook_ref} on {target}",
+            "idempotency_key": idempotency_key,
+        }
+    secret = os.getenv("SENTINEL_SERVICE_IDENTITY_SECRET", "")
+    required = {"approval_id": approval_id, "incident_id": incident_id, "approval_expires_at": approval_expires_at, "plan_hash": plan_hash}
+    if not secret or any(not value for value in required.values()) or not target_identity:
+        raise RuntimeError("full profile Action Gateway adapter 缺少服务身份、审批或目标身份字段")
+    timestamp = str(int(datetime.now().timestamp()))
+    signature = "sha256=" + hmac.new(
+        secret.encode("utf-8"), f"control-api:{timestamp}".encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    payload = {
+        "runbook_ref": runbook_ref, "target": target, "parameters": parameters,
+        "idempotency_key": idempotency_key, "plan_hash": plan_hash,
+        "approval_id": approval_id, "approval_token": approval_token,
+        "approval_expires_at": approval_expires_at, "incident_id": incident_id,
+        "audience": audience, "target_identity": target_identity,
     }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(
+        action_gateway_url.rstrip("/") + "/api/actions", data=body,
+        headers={
+            "Accept": "application/json", "Content-Type": "application/json",
+            "X-Sentinel-Service-Name": "control-api",
+            "X-Sentinel-Service-Timestamp": timestamp,
+            "X-Sentinel-Service-Signature": signature,
+        }, method="POST",
+    )
+
+    def call() -> dict:
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                result = json.loads(response.read(1024 * 1024))
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Action Gateway HTTP 调用失败") from exc
+        if not isinstance(result, dict) or not result.get("execution_id"):
+            raise RuntimeError("Action Gateway 返回缺少 execution_id")
+        return result
+
+    return await asyncio.to_thread(call)
 
 
 async def check_action_status(
     action_gateway_url: str,
     execution_id: str,
+    timeout_seconds: int = 30,
 ) -> dict:
     """
     [Activity] 查询 Action Gateway 中某个执行的当前状态。
 
     用于超时后的协调（reconcile）。
     """
-    _require_real_full_adapter("Action Gateway")
-    await asyncio.sleep(0.1)
-    return {
-        "execution_id": execution_id,
-        "status": "succeeded",
-    }
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        await asyncio.sleep(0.1)
+        return {"execution_id": execution_id, "status": "succeeded"}
+    secret = os.getenv("SENTINEL_SERVICE_IDENTITY_SECRET", "")
+    if not secret:
+        raise RuntimeError("full profile Action Gateway adapter 缺少服务身份密钥")
+    timestamp = str(int(datetime.now().timestamp()))
+    signature = "sha256=" + hmac.new(
+        secret.encode("utf-8"), f"control-api:{timestamp}".encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    request = Request(
+        action_gateway_url.rstrip("/") + f"/api/actions/{execution_id}",
+        headers={
+            "Accept": "application/json", "X-Sentinel-Service-Name": "control-api",
+            "X-Sentinel-Service-Timestamp": timestamp,
+            "X-Sentinel-Service-Signature": signature,
+        }, method="GET",
+    )
+
+    def call() -> dict:
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                result = json.loads(response.read(1024 * 1024))
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Action Gateway 状态查询失败") from exc
+        if not isinstance(result, dict) or result.get("execution_id") != execution_id:
+            raise RuntimeError("Action Gateway 状态响应不匹配")
+        return result
+
+    return await asyncio.to_thread(call)
 
 
 # ---------------------------------------------------------------------------

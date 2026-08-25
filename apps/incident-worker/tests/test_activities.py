@@ -112,3 +112,36 @@ async def test_full_profile_slo_uses_prometheus_samples(monkeypatch):
     assert result["recovered"] is True
     assert result["observed_p99_ms"] == 180.0
     assert result["sample_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_full_profile_action_activity_calls_gateway(monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROFILE", "full")
+    monkeypatch.setenv("SENTINEL_SERVICE_IDENTITY_SECRET", "service-secret")
+    from sentinel_x_incident_worker import activities
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, _limit):
+            return b'{"execution_id":"exec-1","status":"succeeded"}'
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "http://gateway/api/actions"
+        assert request.get_header("X-sentinel-service-name") == "control-api"
+        assert timeout == 120
+        return Response()
+
+    monkeypatch.setattr(activities, "urlopen", fake_urlopen)
+    result = await submit_action_to_gateway(
+        "http://gateway", "restart_deployment@1", "inventory-api", {},
+        "action-idempotency-001", "approval-token", approval_id="approval-1",
+        plan_hash="plan-hash-123456", incident_id="incident-1",
+        approval_expires_at="2026-08-25T23:30:00+00:00",
+        target_identity={"namespace": "demo-shop", "kind": "Deployment", "name": "inventory-api", "uid": "uid-1", "generation": 1},
+    )
+    assert result["execution_id"] == "exec-1"

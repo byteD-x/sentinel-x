@@ -54,6 +54,9 @@ class IncidentWorkflowInput:
     minimum_samples: int = 2
     action_gateway_url: str = "http://127.0.0.1:8090"
     approval_token: str = "local-demo-token"
+    approval_expires_at: str = ""
+    target_identity: dict[str, Any] = field(default_factory=dict)
+    target_resource_version: str = "unknown"
 
 
 @dataclass
@@ -76,6 +79,12 @@ class ActionRequest:
     parameters: dict[str, Any]
     idempotency_key: str
     approval_token: str
+    plan_hash: str = ""
+    approval_id: str = ""
+    incident_id: str = ""
+    approval_expires_at: str = ""
+    target_identity: dict[str, Any] = field(default_factory=dict)
+    target_resource_version: str = "unknown"
 
 
 @dataclass
@@ -124,6 +133,12 @@ async def execute_approved_action(request: ActionRequest) -> dict[str, Any]:
         parameters=request.parameters,
         idempotency_key=request.idempotency_key,
         approval_token=request.approval_token,
+        plan_hash=request.plan_hash,
+        approval_id=request.approval_id,
+        incident_id=request.incident_id,
+        approval_expires_at=request.approval_expires_at,
+        target_identity=request.target_identity,
+        target_resource_version=request.target_resource_version,
     )
 
 
@@ -216,6 +231,15 @@ class TemporalIncidentWorkflow:
                     parameters=input.parameters,
                     idempotency_key=idempotency_key,
                     approval_token=input.approval_token,
+                    plan_hash=input.plan_hash,
+                    approval_id=input.approval_id,
+                    incident_id=input.incident_id,
+                    approval_expires_at=(self._approval.expires_at or input.approval_expires_at),
+                    target_identity=input.target_identity or {
+                        "namespace": "demo-shop", "kind": "Deployment",
+                        "name": input.target, "uid": f"fake-{input.target}", "generation": 1,
+                    },
+                    target_resource_version=input.target_resource_version,
                 ),
                 start_to_close_timeout=timedelta(seconds=120),
                 retry_policy=RetryPolicy(maximum_attempts=1),
