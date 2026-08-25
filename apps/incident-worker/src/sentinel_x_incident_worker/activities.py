@@ -10,11 +10,20 @@ import hashlib
 import json
 import logging
 import math
+import os
 from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
+
+
+def _require_real_full_adapter(capability: str) -> None:
+    """full profile 禁止把 fixture 返回值当作真实外部 I/O。"""
+    if os.getenv("SENTINEL_PROFILE", "light") == "full":
+        raise RuntimeError(
+            f"full profile 未配置真实 {capability} adapter；禁止使用 fixture Activity"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -32,6 +41,7 @@ async def collect_prometheus_evidence(
 
     超时: 30s, 重试: 最多 2 次（瞬态网络错误）
     """
+    _require_real_full_adapter("Prometheus")
     await asyncio.sleep(0.2)
     return {
         "evidence_id": str(uuid4()),
@@ -55,6 +65,7 @@ async def collect_loki_evidence(
     超时: 30s, 重试: 最多 2 次
     结果自动脱敏。
     """
+    _require_real_full_adapter("Loki")
     await asyncio.sleep(0.2)
     return {
         "evidence_id": str(uuid4()),
@@ -77,6 +88,7 @@ async def collect_tempo_evidence(
 
     超时: 30s, 重试: 最多 1 次
     """
+    _require_real_full_adapter("Tempo")
     await asyncio.sleep(0.2)
     return {
         "evidence_id": str(uuid4()),
@@ -99,6 +111,7 @@ async def collect_k8s_pod_status(
     权限: diagnostic-sa，仅 get/list/watch
     禁止: Secrets、exec、写操作
     """
+    _require_real_full_adapter("Kubernetes")
     await asyncio.sleep(0.15)
     return {
         "evidence_id": str(uuid4()),
@@ -207,6 +220,7 @@ async def submit_action_to_gateway(
     - audience 固定，防止 token 被重放到其他服务
     - approval_token 绑定到本次审批
     """
+    _require_real_full_adapter("Action Gateway")
     await asyncio.sleep(0.5)
 
     execution_id = str(uuid4())
@@ -229,6 +243,7 @@ async def check_action_status(
 
     用于超时后的协调（reconcile）。
     """
+    _require_real_full_adapter("Action Gateway")
     await asyncio.sleep(0.1)
     return {
         "execution_id": execution_id,
@@ -254,6 +269,7 @@ async def verify_slo_recovery(
 
     通过比较 baseline 和 observed 窗口的指标来判断恢复。
     """
+    _require_real_full_adapter("SLO observation")
     await asyncio.sleep(0.3)
     samples = observed_p99_samples or []
     failure_reason: str | None = None
