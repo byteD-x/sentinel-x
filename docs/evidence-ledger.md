@@ -17,7 +17,7 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`python scripts/verify_local_mvp.py --scenario-cycles 3 --evaluation-runs 3`，2026-08-25（Windows，本地 light）结果为 Python `226 passed`；同时通过轻量 Ruff、Web Console `24 passed`/lint/build/UI contract、Terminal Console `7 passed`/build、六场景 3 轮 cleanup、固定攻击集和 B0/B1/C1 fixture 评测。原始汇总为 `evidence/local-mvp/verification-report.json`（该目录被忽略，不作为发布产物提交）；仍未形成真实 full profile benchmark。
+- 本地门禁：`python scripts/verify_local_mvp.py --scenario-cycles 3 --evaluation-dataset holdout --evaluation-runs 10`，2026-08-25（Windows，本地 light）结果为 Python `233 passed`；同时通过轻量 Ruff、Web Console `24 passed`/lint/build/UI contract、Terminal Console `7 passed`/build、六场景 3 轮 cleanup、固定攻击集和 B0/B1/C1 fixture holdout（每场景 10 次）。原始汇总为 `evidence/local-mvp/verification-report.json`（该目录被忽略，不作为发布产物提交）；仍未形成真实 full profile benchmark。
 - 前端门禁：Web Console `npm test -- --run` 为 `24 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
 - Python 轻量门禁：`python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有既存 import/style/type-datetime 规则问题，不能称为完整 lint 通过。
 - 本轮流程收敛：场景启动、审批后执行和 API 启动恢复均通过 `LocalExerciseWorkflow`；审批决定不再直接写入 action/recovery fixture 事件。
