@@ -21,9 +21,9 @@ for source_path in (ROOT / "evals" / "src", ROOT / "packages" / "contracts" / "s
     if str(source_path) not in sys.path:
         sys.path.insert(0, str(source_path))
 
-from sentinel_x_evals.baselines import label_baseline, rule_baseline, standard_scenario_ids
-from sentinel_x_evals.local_fixture import LocalFixtureScenarioEvaluator
-from sentinel_x_evals.runner import EvalConfig, EvalRunner, save_eval_report
+from sentinel_x_evals.baselines import label_baseline, rule_baseline, standard_scenario_ids  # noqa: E402
+from sentinel_x_evals.local_fixture import LocalFixtureScenarioEvaluator  # noqa: E402
+from sentinel_x_evals.runner import EvalConfig, EvalRunner, save_eval_report  # noqa: E402
 
 
 def _commit_sha() -> str | None:
