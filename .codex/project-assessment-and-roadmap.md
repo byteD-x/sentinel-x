@@ -45,7 +45,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 
 - Python Ruff 轻量门禁 `python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有 236 个既存风格/类型/时区提示，不能把完整 lint 记为通过。
 - 当前 `python -m pytest -q` 可在本地 Windows 环境完成 **225 passed**；干净环境安装与完整依赖锁定仍需单独记录，不能据此宣称 full profile 门禁通过。
-- `[部分完成]` Temporal Server replay、Worker 注册、Signal/Activity retry 和 Worker 重启已在单场景 thin slice 验证；多场景 full profile、history refs 对账和 PostgreSQL projection 仍未完成。
+- `[部分完成]` Temporal Server replay、Worker 注册、Signal/Activity retry 和 Worker 重启已在单场景 thin slice 验证；full profile 已持久化 PostgreSQL workflow checkpoint，多场景 full profile、history refs 对账和业务投影全链路仍未完成。
 - `[部分完成]` Action Gateway SQLite 审批存储已支持重启恢复和跨连接原子消费；PostgreSQL migration、Control API/PostgreSQL 权威审批与 ActionExecution 持久化已完成本机集成验证，跨服务事务和 crash/reconcile 仍未完成。
 - `[部分完成]` Prometheus/Loki/Tempo 与固定 namespace Kubernetes PodList full profile Activity 已接入受限 HTTP 来源并在缺配置/后端失败时拒绝；真实集群 RBAC/OTel E2E 和跨服务 ActionExecution 对账仍未完成。
 - `[部分完成]` Action Gateway 默认仍为 fixture 执行；受控 fake Kubernetes 仅在隔离测试中验证状态变化和失败注入，不写真实 Kubernetes，恢复验证也仍未连接真实观测源。
@@ -214,7 +214,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 ### 0–30 天：可控交付（当前已完成/进行中）
 
 - `[已完成]` 关闭 P0-1 本地门禁：CI、轻量 Ruff、统一 test/lint/build、敏感信息扫描；远端 CI run 证据仍待补充。
-- `[部分完成]` 完成 Temporal spike、Workflow 注册、replay、Signal 和 Worker restart；PostgreSQL migration/outbox 与主要领域持久化已完成本机验证，跨投影 checkpoint 对账仍未完成。
+- `[部分完成]` 完成 Temporal spike、Workflow 注册、replay、Signal 和 Worker restart；PostgreSQL migration/outbox、主要领域持久化和 workflow checkpoint 已完成本机验证，跨投影 checkpoint 对账仍未完成。
 - `[已完成]` 交付单场景 durable thin slice，R1 仍默认关闭真实写动作。
 - `[已完成]` 增加受控 fake Kubernetes 执行器切片，真实集群写动作仍默认关闭。
 - `[部分完成]` 产出证据账本和 D1 基线记录；正式 evidence manifest、原始报告 hash 和发布包仍未完成。

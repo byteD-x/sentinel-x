@@ -18,7 +18,7 @@ The runner, runtime repositories and integration tests are implemented. When Pos
 `SENTINEL_POSTGRES_ADMIN_URL=... python -m pytest -q apps/control-api/tests/test_postgres_integration.py -m integration`
 performs an isolated up/down/reapply and constraint check, then removes its
 temporary database. Full profile wires the domain repository, outbox dispatcher,
-nonce/idempotency stores and read-model rebuild into the Control API lifespan;
+nonce/idempotency stores, workflow checkpoints and read-model rebuild into the Control API lifespan;
 Action Gateway uses the same schema for approval consumption and ActionExecution
 metadata. Temporal reconciliation, cross-service crash/restart accounting and
 live application integration remain separate work items. Full-profile mutation idempotency is persisted in

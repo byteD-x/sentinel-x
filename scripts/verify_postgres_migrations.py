@@ -82,14 +82,14 @@ def _assert_schema(admin_url: str, database: str) -> dict[str, int]:
       (SELECT count(*) FROM information_schema.tables
        WHERE table_schema = 'public' AND table_name IN
        ('incidents','remediation_plans','timeline_events','approval_requests',
-        'approval_decisions','action_executions','verification_results','outbox_events','idempotency_records','alert_replay_nonces')) AS table_count,
+        'approval_decisions','action_executions','verification_results','outbox_events','idempotency_records','alert_replay_nonces','workflow_checkpoints')) AS table_count,
       (SELECT count(*) FROM pg_trigger WHERE tgname IN
        ('timeline_events_immutable','approval_decisions_immutable')) AS trigger_count,
       (SELECT count(*) FROM pg_indexes WHERE indexname = 'incidents_active_fingerprint_uidx') AS index_count;
     """
     output = _psql(admin_url, database, "--tuples-only", "--no-align", "--command", query).stdout.strip()
     values = [int(value) for value in output.split("|")]
-    expected = {"table_count": 10, "trigger_count": 2, "index_count": 1}
+    expected = {"table_count": 11, "trigger_count": 2, "index_count": 1}
     actual = dict(zip(expected, values, strict=True))
     if actual != expected:
         raise VerificationError(f"schema 断言失败: {actual}，期望 {expected}")
@@ -162,8 +162,10 @@ def main() -> int:
             MIGRATIONS / "0002_idempotency.sql",
             MIGRATIONS / "0003_action_execution_metadata.sql",
             MIGRATIONS / "0004_alert_replay_nonces.sql",
+            MIGRATIONS / "0005_workflow_checkpoints.sql",
         ]
         down = [
+            MIGRATIONS / "0005_workflow_checkpoints.down.sql",
             MIGRATIONS / "0004_alert_replay_nonces.down.sql",
             MIGRATIONS / "0003_action_execution_metadata.down.sql",
             MIGRATIONS / "0002_idempotency.down.sql",

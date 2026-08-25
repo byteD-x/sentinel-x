@@ -911,6 +911,35 @@ class PostgresStore(InMemoryStore):
         hydrated = self._hydrate(record)
         return [event for event in hydrated.timeline if event.sequence > after_sequence]
 
+    def create_workflow_checkpoint(
+        self, incident_id: str, scenario_id: str, phase: str
+    ) -> dict:
+        return self.repository.create_workflow_checkpoint(
+            incident_id=UUID(incident_id), scenario_id=scenario_id, phase=phase
+        )
+
+    def get_workflow_checkpoint(self, incident_id: str) -> Optional[dict]:
+        try:
+            return self.repository.get_workflow_checkpoint(UUID(incident_id))
+        except ValueError:
+            return None
+
+    def update_workflow_checkpoint(
+        self,
+        incident_id: str,
+        *,
+        phase: Optional[str] = None,
+        action_execution_id: Optional[str] = None,
+        completed: Optional[bool] = None,
+    ) -> dict:
+        return self.repository.update_workflow_checkpoint(
+            UUID(incident_id), phase=phase,
+            action_execution_id=action_execution_id, completed=completed
+        )
+
+    def list_resumable_workflow_checkpoints(self) -> list[dict]:
+        return self.repository.list_resumable_workflow_checkpoints()
+
     def create_incident(self, data: IncidentCreate) -> StoredIncident:
         existing = self.find_by_fingerprint(data.alert_source.fingerprint)
         record = self.repository.create_incident(

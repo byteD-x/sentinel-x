@@ -189,6 +189,117 @@ class PostgresIncidentRepository:
                 ))
             return records
 
+    @staticmethod
+    def _checkpoint(row: tuple[Any, ...]) -> dict[str, Any]:
+        return {
+            "incident_id": str(row[0]),
+            "workflow_id": str(row[1]),
+            "scenario_id": str(row[2]),
+            "phase": str(row[3]),
+            "action_execution_id": row[4],
+            "completed": bool(row[5]),
+            "updated_at": row[6].isoformat(),
+        }
+
+    def create_workflow_checkpoint(
+        self, *, incident_id: UUID, scenario_id: str, phase: str
+    ) -> dict[str, Any]:
+        """在 PostgreSQL 中原子创建或读取事故唯一 workflow checkpoint。"""
+        workflow_id = f"incident/{incident_id}"
+        with self._transaction() as (_connection, cursor):
+            cursor.execute(
+                """
+                SELECT incident_id, workflow_id, scenario_id, phase,
+                       action_execution_id, completed, updated_at
+                FROM workflow_checkpoints
+                WHERE incident_id = %s
+                FOR UPDATE
+                """,
+                (incident_id,),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                if str(existing[2]) != scenario_id:
+                    raise PostgresRepositoryError("同一事故不能绑定多个场景工作流")
+                return self._checkpoint(existing)
+            now = datetime.now(timezone.utc)
+            cursor.execute(
+                """
+                INSERT INTO workflow_checkpoints(
+                    incident_id, workflow_id, scenario_id, phase, updated_at
+                ) VALUES (%s, %s, %s, %s, %s)
+                RETURNING incident_id, workflow_id, scenario_id, phase,
+                          action_execution_id, completed, updated_at
+                """,
+                (incident_id, workflow_id, scenario_id, phase, now),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise PostgresRepositoryError("workflow checkpoint 写入未返回记录")
+            cursor.execute(
+                """
+                UPDATE incidents
+                SET workflow_id = %s, projection_version = projection_version + 1,
+                    updated_at = %s
+                WHERE id = %s
+                """,
+                (workflow_id, now, incident_id),
+            )
+            return self._checkpoint(row)
+
+    def get_workflow_checkpoint(self, incident_id: UUID) -> dict[str, Any] | None:
+        with self._transaction() as (_connection, cursor):
+            cursor.execute(
+                """
+                SELECT incident_id, workflow_id, scenario_id, phase,
+                       action_execution_id, completed, updated_at
+                FROM workflow_checkpoints WHERE incident_id = %s
+                """,
+                (incident_id,),
+            )
+            row = cursor.fetchone()
+            return self._checkpoint(row) if row else None
+
+    def update_workflow_checkpoint(
+        self,
+        incident_id: UUID,
+        *,
+        phase: str | None = None,
+        action_execution_id: str | None = None,
+        completed: bool | None = None,
+    ) -> dict[str, Any]:
+        with self._transaction() as (_connection, cursor):
+            now = datetime.now(timezone.utc)
+            cursor.execute(
+                """
+                UPDATE workflow_checkpoints
+                SET phase = COALESCE(%s, phase),
+                    action_execution_id = COALESCE(%s, action_execution_id),
+                    completed = COALESCE(%s, completed),
+                    updated_at = %s
+                WHERE incident_id = %s
+                RETURNING incident_id, workflow_id, scenario_id, phase,
+                          action_execution_id, completed, updated_at
+                """,
+                (phase, action_execution_id, completed, now, incident_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise PostgresRepositoryError("workflow checkpoint 不存在")
+            return self._checkpoint(row)
+
+    def list_resumable_workflow_checkpoints(self) -> list[dict[str, Any]]:
+        with self._transaction() as (_connection, cursor):
+            cursor.execute(
+                """
+                SELECT incident_id, workflow_id, scenario_id, phase,
+                       action_execution_id, completed, updated_at
+                FROM workflow_checkpoints
+                WHERE completed = FALSE ORDER BY updated_at, incident_id
+                """
+            )
+            return [self._checkpoint(row) for row in cursor.fetchall()]
+
     def transition_status(
         self,
         *,

@@ -356,6 +356,49 @@ def test_postgres_store_rebuilds_incident_and_timeline_after_restart():
 
 
 @pytest.mark.integration
+def test_postgres_workflow_checkpoint_survives_restart():
+    admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
+    if not admin_url:
+        pytest.skip("未设置 SENTINEL_POSTGRES_ADMIN_URL")
+    psycopg = pytest.importorskip("psycopg")
+    database = f"sentinel_x_checkpoint_{uuid4().hex[:10]}"
+    admin = psycopg.connect(admin_url, autocommit=True)
+    try:
+        admin.execute(f'CREATE DATABASE "{database}"')
+        database_url = admin_url.rsplit("/", 1)[0] + f"/{database}"
+        apply_migrations(
+            database_url,
+            migrations_dir=Path(__file__).resolve().parents[3] / "migrations",
+            connect=lambda *args, **kwargs: psycopg.connect(database_url, **kwargs),
+        )
+        repository = PostgresIncidentRepository(lambda: psycopg.connect(database_url))
+        incident = repository.create_incident(
+            fingerprint="checkpoint-fingerprint",
+            severity="warning",
+            service="inventory-api",
+            workflow_id="incident/checkpoint-1",
+        )
+        checkpoint = repository.create_workflow_checkpoint(
+            incident_id=incident.id, scenario_id="inventory-latched-5xx@1", phase="awaiting_approval"
+        )
+        assert checkpoint["completed"] is False
+        repository.update_workflow_checkpoint(
+            incident.id, phase="executing", action_execution_id="exec-checkpoint-1"
+        )
+        reopened = PostgresIncidentRepository(lambda: psycopg.connect(database_url))
+        restored = reopened.get_workflow_checkpoint(incident.id)
+        assert restored is not None
+        assert restored["phase"] == "executing"
+        assert restored["action_execution_id"] == "exec-checkpoint-1"
+        assert [item["incident_id"] for item in reopened.list_resumable_workflow_checkpoints()] == [str(incident.id)]
+        reopened.update_workflow_checkpoint(incident.id, phase="terminal", completed=True)
+        assert reopened.list_resumable_workflow_checkpoints() == []
+    finally:
+        admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        admin.close()
+
+
+@pytest.mark.integration
 def test_postgres_approval_is_immutable_and_single_decision():
     admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
     if not admin_url:
