@@ -834,6 +834,12 @@ API_VERSION = "v1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期。"""
+    if os.getenv("SENTINEL_PROFILE", "light") == "full":
+        # full profile 尚未接入 PostgreSQL repository/projection；禁止以本地
+        # SQLite 继续运行，避免把 light 结果误报成 full 能力。
+        raise RuntimeError(
+            "SENTINEL_PROFILE=full 当前不可用：PostgreSQL repository/projection 尚未接线"
+        )
     local_workflow.resume_all()
     yield
 
