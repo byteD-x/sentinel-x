@@ -44,12 +44,12 @@
 
 当前阻塞：
 
-- Control API 已提供 `/api/v1`、local-only 短期 HMAC session、ETag/If-Match 和 SQLite outbox；仍缺 OIDC/CSRF、PostgreSQL 权威投影和跨服务事务。
+- Control API 已提供 `/api/v1`、local-only 短期 HMAC session、ETag/If-Match；light 仍使用 SQLite outbox，full profile 已接入 PostgreSQL Incident/Timeline 写入与启动读模型重建，仍缺 OIDC/CSRF、审批/Action 跨服务事务。
 - Action Gateway 已默认 fail-closed，并校验本地 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份和一次性消费；SQLite local backend 已覆盖重启恢复与 SQL 条件更新原子消费，但仍未实现 PostgreSQL 绑定审批读取、TokenReview 和跨服务事务。
 - Alert Ingress 已校验时间戳、nonce、HMAC 和有界 body，并提供版本化 Alertmanager webhook 转换；仍未完成 PostgreSQL 去重事务和真实 Alertmanager/观测栈联调。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
 - light Workflow fixture 的动作执行仍是模拟路径，但恢复结论已改为读取受控观测样本；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal、Worker restart 和 history replay。
-- full 多场景 Temporal replay、PostgreSQL repository/projection/outbox 和 full observability E2E 未完成；PostgreSQL schema migration 已在本机 PostgreSQL 15 临时数据库完成 up/down/reapply 与约束验证，domain repository/outbox dispatcher 和 Temporal checkpoint 对账契约已有代码/单测，但尚未完成 psycopg 集成、Control API lifespan 接线和真实 crash/restart 对账。Control API、Diagnostic Gateway 和 Incident Worker 现在会在缺少真实适配器时 fail-closed，禁止静默回退到本地 SQLite 或 fixture 成功。当前 outbox 仅为 local SQLite 可恢复切片。
+- full 多场景 Temporal replay、PostgreSQL 审批/Action 投影和 full observability E2E 未完成；PostgreSQL schema migration、domain repository、outbox dispatcher、Control API lifespan 接线及 Incident/Timeline 启动重建已在本机 PostgreSQL 15 临时数据库验证，真实 crash/restart 对账和 outbox 后台发布仍未完成。Control API、Diagnostic Gateway 和 Incident Worker 现在会在缺少真实适配器时 fail-closed，禁止静默回退到本地 SQLite 或 fixture 成功。
 - GitHub Actions 已配置独立 PostgreSQL 16 migration integration job，但尚无远端成功 run 证据；本地 PostgreSQL 15 集成通过不替代远端 CI 证据。
 - 最近远端 run `32843853898` 因 GitHub 账户 billing lock 未启动，CI 门禁保持未验证。
 - 默认质量门禁需持续覆盖全部真实测试目录，并保留原始输出。

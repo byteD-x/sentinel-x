@@ -346,6 +346,25 @@ class StoredIncident:
     _timeline_seq: int = 0
 
 
+_ALLOWED_STATUS_TRANSITIONS = {
+    IncidentStatus.DETECTED: {IncidentStatus.TRIAGING, IncidentStatus.FAILED},
+    IncidentStatus.TRIAGING: {IncidentStatus.DIAGNOSING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+    IncidentStatus.DIAGNOSING: {
+        IncidentStatus.PLAN_PROPOSED,
+        IncidentStatus.VERIFYING,
+        IncidentStatus.ESCALATED,
+        IncidentStatus.FAILED,
+    },
+    IncidentStatus.PLAN_PROPOSED: {IncidentStatus.AWAITING_APPROVAL, IncidentStatus.VERIFYING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+    IncidentStatus.AWAITING_APPROVAL: {IncidentStatus.EXECUTING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+    IncidentStatus.EXECUTING: {IncidentStatus.VERIFYING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+    IncidentStatus.VERIFYING: {IncidentStatus.RESOLVED, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
+    IncidentStatus.RESOLVED: set(),
+    IncidentStatus.ESCALATED: set(),
+    IncidentStatus.FAILED: set(),
+}
+
+
 class InMemoryStore:
     """本地读模型缓存，可选用 SQLite 快照跨进程恢复。"""
 
@@ -578,24 +597,7 @@ class InMemoryStore:
         old_status = incident.status
         if new_status == old_status:
             return
-        allowed = {
-            IncidentStatus.DETECTED: {IncidentStatus.TRIAGING, IncidentStatus.FAILED},
-            IncidentStatus.TRIAGING: {IncidentStatus.DIAGNOSING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
-            IncidentStatus.DIAGNOSING: {
-                IncidentStatus.PLAN_PROPOSED,
-                IncidentStatus.VERIFYING,
-                IncidentStatus.ESCALATED,
-                IncidentStatus.FAILED,
-            },
-            IncidentStatus.PLAN_PROPOSED: {IncidentStatus.AWAITING_APPROVAL, IncidentStatus.VERIFYING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
-            IncidentStatus.AWAITING_APPROVAL: {IncidentStatus.EXECUTING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
-            IncidentStatus.EXECUTING: {IncidentStatus.VERIFYING, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
-            IncidentStatus.VERIFYING: {IncidentStatus.RESOLVED, IncidentStatus.ESCALATED, IncidentStatus.FAILED},
-            IncidentStatus.RESOLVED: set(),
-            IncidentStatus.ESCALATED: set(),
-            IncidentStatus.FAILED: set(),
-        }
-        if new_status not in allowed[old_status]:
+        if new_status not in _ALLOWED_STATUS_TRANSITIONS[old_status]:
             raise ValueError(f"非法事故状态迁移: {old_status.value} -> {new_status.value}")
         incident.status = new_status
         incident.updated_at = datetime.now()
@@ -821,20 +823,64 @@ class PostgresStore(InMemoryStore):
     def __init__(self, repository: PostgresIncidentRepository):
         super().__init__(state_path=None)
         self.repository = repository
+        self.rebuild_projection()
 
     @staticmethod
-    def _local_incident(record, data: IncidentCreate) -> StoredIncident:
-        return StoredIncident(
-            id=str(record.id),
-            fingerprint=record.fingerprint,
-            severity=data.alert_source.severity,
-            alert_name=data.alert_source.alert_name,
-            description=data.alert_source.description,
-            created_at=record.opened_at.replace(tzinfo=None),
-            updated_at=record.opened_at.replace(tzinfo=None),
-            workflow_id=record.workflow_id,
-            version=max(1, record.projection_version),
+    def _timestamp(value: datetime) -> datetime:
+        return value.replace(tzinfo=None) if value.tzinfo else value
+
+    def _hydrate(self, record) -> StoredIncident:
+        timeline = []
+        for item in self.repository.list_timeline(record.id):
+            actor = {
+                "APPROVER": "approver:postgres",
+                "INVESTIGATOR": "investigator",
+                "WORKFLOW": "workflow",
+                "SCENARIO_RUNNER": "scenario_runner",
+                "USER": "user",
+            }.get(item.actor_type, "system")
+            timeline.append(TimelineEvent(
+                id=str(item.id), incident_id=str(item.incident_id),
+                sequence=item.sequence, event_type=item.event_type, actor=actor,
+                payload=dict(item.payload), timestamp=self._timestamp(item.occurred_at),
+            ))
+        opened_at = self._timestamp(record.opened_at)
+        incident = StoredIncident(
+            id=str(record.id), fingerprint=record.fingerprint,
+            status=IncidentStatus(record.status), severity=IncidentSeverity(record.severity),
+            alert_name=record.service, description="",
+            created_at=opened_at, updated_at=opened_at,
+            workflow_id=record.workflow_id, version=max(1, record.projection_version),
+            timeline=timeline, _timeline_seq=max((event.sequence for event in timeline), default=0),
         )
+        self._incidents[incident.id] = incident
+        self._fingerprint_index[incident.fingerprint] = incident.id
+        return incident
+
+    def rebuild_projection(self) -> None:
+        self._incidents.clear()
+        self._fingerprint_index.clear()
+        for record in self.repository.list_incidents():
+            self._hydrate(record)
+
+    def find_by_fingerprint(self, fingerprint: str) -> StoredIncident | None:
+        incident = super().find_by_fingerprint(fingerprint)
+        if incident:
+            return incident
+        for record in self.repository.list_incidents():
+            if record.fingerprint == fingerprint:
+                return self._hydrate(record)
+        return None
+
+    def get_incident(self, incident_id: str) -> StoredIncident | None:
+        incident = super().get_incident(incident_id)
+        if incident:
+            return incident
+        try:
+            record = self.repository.get_incident(UUID(incident_id))
+        except ValueError:
+            return None
+        return self._hydrate(record) if record else None
 
     def create_incident(self, data: IncidentCreate) -> StoredIncident:
         existing = self.find_by_fingerprint(data.alert_source.fingerprint)
@@ -845,22 +891,47 @@ class PostgresStore(InMemoryStore):
             workflow_id=f"incident/{uuid4()}",
         )
         if existing and existing.id == str(record.id):
-            return existing
-        incident = self._local_incident(record, data)
-        self._incidents[incident.id] = incident
-        self._fingerprint_index[incident.fingerprint] = incident.id
-        event = TimelineEvent(
-            id=str(uuid4()),
-            incident_id=incident.id,
-            sequence=1,
-            event_type="incident.created",
-            actor="alert_ingress",
-            payload={"fingerprint": incident.fingerprint},
-            timestamp=incident.created_at,
+            self._hydrate(record)
+            return self._incidents[str(record.id)]
+        self._hydrate(record)
+        return self._incidents[str(record.id)]
+
+    def set_status(
+        self,
+        incident: StoredIncident,
+        new_status: IncidentStatus,
+        reason: str,
+        actor: str = "system",
+    ) -> None:
+        old_status = incident.status
+        if new_status == old_status:
+            return
+        if new_status not in _ALLOWED_STATUS_TRANSITIONS[old_status]:
+            raise ValueError(f"非法事故状态迁移: {old_status.value} -> {new_status.value}")
+        actor_type = (
+            "APPROVER" if actor.startswith("approver:")
+            else "WORKFLOW" if actor in {"workflow", "local_action_gateway"}
+            else "INVESTIGATOR" if "diagnostic" in actor or "investigator" in actor
+            else "SCENARIO_RUNNER" if "scenario" in actor
+            else "USER" if actor.startswith("user:")
+            else "SYSTEM"
         )
-        incident.timeline.append(event)
-        incident._timeline_seq = 1
-        return incident
+        record, result = self.repository.transition_status(
+            incident_id=UUID(incident.id),
+            expected_status=old_status.value,
+            new_status=new_status.value,
+            actor_type=actor_type,
+            payload={"from": old_status.value, "to": new_status.value, "reason": reason},
+        )
+        incident.status = new_status
+        incident.updated_at = datetime.now()
+        incident.version = max(1, record.projection_version)
+        incident.timeline.append(TimelineEvent(
+            id=str(result.id), incident_id=incident.id, sequence=result.sequence,
+            event_type=result.event_type, actor=actor, payload=dict(result.payload),
+            timestamp=self._timestamp(result.occurred_at),
+        ))
+        incident._timeline_seq = result.sequence
 
     def _add_timeline_event(
         self,

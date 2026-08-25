@@ -137,6 +137,102 @@ class PostgresIncidentRepository:
             )
             return self._incident(row)
 
+    def get_incident(self, incident_id: UUID) -> IncidentRecord | None:
+        with self._transaction() as (_connection, cursor):
+            cursor.execute(
+                """
+                SELECT id, workflow_id, alert_fingerprint, status, severity, service,
+                       opened_at, projection_version
+                FROM incidents WHERE id = %s
+                """,
+                (incident_id,),
+            )
+            row = cursor.fetchone()
+            return self._incident(row) if row else None
+
+    def list_incidents(self) -> list[IncidentRecord]:
+        with self._transaction() as (_connection, cursor):
+            cursor.execute(
+                """
+                SELECT id, workflow_id, alert_fingerprint, status, severity, service,
+                       opened_at, projection_version
+                FROM incidents ORDER BY opened_at DESC, id DESC
+                """
+            )
+            return [self._incident(row) for row in cursor.fetchall()]
+
+    def list_timeline(self, incident_id: UUID) -> list[TimelineRecord]:
+        with self._transaction() as (_connection, cursor):
+            cursor.execute(
+                """
+                SELECT id, incident_id, sequence, event_type, actor_type,
+                       payload_ref, occurred_at
+                FROM timeline_events
+                WHERE incident_id = %s ORDER BY sequence
+                """,
+                (incident_id,),
+            )
+            records = []
+            for row in cursor.fetchall():
+                payload = row[5]
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                records.append(TimelineRecord(
+                    id=UUID(str(row[0])), incident_id=UUID(str(row[1])),
+                    sequence=int(row[2]), event_type=str(row[3]),
+                    actor_type=str(row[4]), payload=dict(payload or {}),
+                    occurred_at=row[6],
+                ))
+            return records
+
+    def transition_status(
+        self,
+        *,
+        incident_id: UUID,
+        expected_status: str,
+        new_status: str,
+        actor_type: str,
+        payload: Mapping[str, Any],
+    ) -> tuple[IncidentRecord, TimelineRecord]:
+        with self._transaction() as (_connection, cursor):
+            cursor.execute(
+                "SELECT status FROM incidents WHERE id = %s FOR UPDATE",
+                (incident_id,),
+            )
+            current = cursor.fetchone()
+            if current is None:
+                raise PostgresRepositoryError("事故不存在")
+            if str(current[0]) != expected_status:
+                raise PostgresRepositoryError("事故状态版本冲突")
+            now = datetime.now(timezone.utc)
+            cursor.execute(
+                """
+                UPDATE incidents
+                SET status = %s, projection_version = projection_version + 1,
+                    updated_at = %s,
+                    closed_at = CASE WHEN %s IN ('RESOLVED', 'ESCALATED', 'FAILED')
+                                     THEN %s ELSE NULL END
+                WHERE id = %s
+                RETURNING id, workflow_id, alert_fingerprint, status, severity, service,
+                          opened_at, projection_version
+                """,
+                (new_status, now, new_status, now, incident_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise PostgresRepositoryError("事故状态更新未返回记录")
+            event = self._append_event_cursor(
+                cursor,
+                incident_id=incident_id,
+                event_type="incident.status_changed",
+                actor_type=actor_type,
+                payload=payload,
+                workflow_event_id=f"status:{incident_id}:{row[7]}",
+                occurred_at=now,
+                sequence=self._next_sequence(cursor, incident_id),
+            )
+            return self._incident(row), event
+
     def append_event(
         self,
         *,
