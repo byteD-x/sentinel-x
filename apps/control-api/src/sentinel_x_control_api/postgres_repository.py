@@ -468,6 +468,42 @@ class PostgresIncidentRepository:
                 occurred_at,
             ),
         )
+        if event_type == "recovery.verified":
+            passed = payload.get("result") in {True, "passed"}
+            recovery_actor = str(payload.get("recovery_actor", "UNKNOWN"))
+            if recovery_actor == "local_action_gateway":
+                recovery_actor = "ACTION_GATEWAY"
+            if recovery_actor not in {"ACTION_GATEWAY", "SCENARIO_RUNNER", "HUMAN", "UNKNOWN"}:
+                recovery_actor = "UNKNOWN"
+            action_execution_id = None
+            execution_ref = payload.get("execution_id")
+            if execution_ref:
+                try:
+                    action_execution_id = UUID(str(execution_ref))
+                except ValueError:
+                    action_execution_id = None
+            observed_window = {
+                key: value for key, value in payload.items()
+                if key not in {"result", "recovery_actor", "execution_id"}
+            }
+            cursor.execute(
+                """
+                INSERT INTO verification_results(
+                    id, incident_id, action_execution_id, trigger_type, trigger_ref,
+                    recovery_actor, slo_policy_version, metric, threshold,
+                    baseline_window, observed_window, sli_results, passed, failure_reason
+                ) VALUES (%s, %s, %s, 'WORKFLOW', %s, %s, 'mvp@1',
+                          'http_request_p99_ms', %s::jsonb, %s::jsonb, %s::jsonb,
+                          %s::jsonb, %s, %s)
+                """,
+                (
+                    uuid4(), incident_id, action_execution_id, workflow_event_id,
+                    recovery_actor, json.dumps({"p99_ms": 200}),
+                    json.dumps({"minutes": 15}), json.dumps(observed_window),
+                    json.dumps({"passed": passed}), passed,
+                    None if passed else str(payload.get("failure_reason", "verification failed")),
+                ),
+            )
         return TimelineRecord(
             id=UUID(str(row[0])),
             incident_id=UUID(str(row[1])),

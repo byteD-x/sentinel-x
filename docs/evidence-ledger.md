@@ -43,6 +43,7 @@
 - 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。Control API 另有受 session 门控的 light 事故 JSON 导出，递归脱敏并返回内容 SHA-256，不等同于持久异步事故包。
 - Action Gateway PostgreSQL 审批消费切片：`PostgresApprovalStore` 从 `approval_requests + remediation_plans` 读取不可变审批声明，`consume` 使用状态/过期/额度条件更新；本机 PostgreSQL 临时库验证读取、目标身份映射、一次消费、重复消费拒绝和重启后不可再消费。full profile 缺少 PostgreSQL URL/驱动/健康检查失败时 fail-closed。仍未完成 TokenReview、mTLS/服务身份和 ActionExecution PostgreSQL 跨服务事务。
 - ActionExecution PostgreSQL 持久化切片：`PostgresExecutionStore` 将执行登记、幂等键 hash、目标身份、before/after、状态和错误写入 `action_executions`；本机 PostgreSQL 临时库验证幂等读取、状态更新和重启恢复。真实 Kubernetes effect、跨服务 ActionExecution 事务和 reconcile 仍未完成。
+- VerificationResult PostgreSQL 持久化切片：`recovery.verified` Timeline 事件在同一领域事务中追加 `verification_results`，保存 `passed`、`recovery_actor`、SLO policy、threshold、baseline/observed window 和 failure reason；本机 PostgreSQL 重启集成验证通过。当前数据由受控 workflow payload 触发，尚未连接 Prometheus/Loki/Tempo 真实观测查询。
 - full API CSRF 切片：`/api/v1` 状态变更在 `SENTINEL_PROFILE=full` 下要求 `X-CSRF-Token = HMAC(session_signing_key, "csrf:" + Authorization)`；测试覆盖缺失 token 403 与有效 token 202。该机制保护 local-session 原型，不等同于 OIDC/浏览器正式会话或服务身份认证。
 - full API idempotency 切片：`/api/v1` POST/PUT/PATCH/DELETE 在 full profile 要求 16–128 字符 `Idempotency-Key`，按 Authorization+路由+body hash 缓存成功响应；同 key 同 body 重放原响应，body 冲突返回 409。该缓存是进程内门禁，跨重启/多副本仍需 PostgreSQL `idempotency_records` 接线。
 - 限制：full Kubernetes/observability E2E、TokenReview/服务身份和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈与 Kubernetes 权限清单静态检查及本地 fixture 证据包。
