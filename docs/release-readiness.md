@@ -49,7 +49,7 @@
 - Alert Ingress 已校验时间戳、nonce、HMAC 和有界 body，并提供版本化 Alertmanager webhook 转换；仍未完成 PostgreSQL 去重事务和真实 Alertmanager/观测栈联调。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
 - light Workflow fixture 的动作执行仍是模拟路径，但恢复结论已改为读取受控观测样本；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal、Worker restart 和 history replay。
-- full 多场景 Temporal replay、PostgreSQL 审批/Action 投影和 full observability E2E 未完成；PostgreSQL schema migration、domain repository、outbox dispatcher、Control API lifespan 接线及 Incident/Timeline 启动重建已在本机 PostgreSQL 15 临时数据库验证，真实 crash/restart 对账和 outbox 后台发布仍未完成。Control API、Diagnostic Gateway 和 Incident Worker 现在会在缺少真实适配器时 fail-closed，禁止静默回退到本地 SQLite 或 fixture 成功。
+- full 多场景 Temporal replay、PostgreSQL 审批/Action 投影和 full observability E2E 未完成；PostgreSQL schema migration、domain repository、outbox dispatcher、Control API lifespan 后台发布及 Incident/Timeline 启动重建已在本机 PostgreSQL 15 临时数据库验证，真实 crash/restart 对账和跨进程 SSE 发布仍未完成。Control API、Diagnostic Gateway 和 Incident Worker 现在会在缺少真实适配器时 fail-closed，禁止静默回退到本地 SQLite 或 fixture 成功。
 - GitHub Actions 已配置独立 PostgreSQL 16 migration integration job，但尚无远端成功 run 证据；本地 PostgreSQL 15 集成通过不替代远端 CI 证据。
 - 最近远端 run `32843853898` 因 GitHub 账户 billing lock 未启动，CI 门禁保持未验证。
 - 默认质量门禁需持续覆盖全部真实测试目录，并保留原始输出。

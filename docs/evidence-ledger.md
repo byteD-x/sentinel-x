@@ -30,7 +30,7 @@
 - PostgreSQL CI gate：`.github/workflows/quality.yml` 新增独立 `postgres-integration` job，使用 PostgreSQL 16 service、`postgresql-client` 和显式 admin URL，执行真实 migration integration 与脚本 smoke；远端 workflow run 尚未产生，不能提前宣称 CI 已通过。
 - CI 外部状态：GitHub Actions run `32843853898` 的所有 job 均未启动，GitHub 注释为账户 billing lock；这是远端账户状态阻塞，不是测试通过或失败证据。
 - PostgreSQL domain repository slice：`PostgresIncidentRepository` 已固化 active fingerprint 去重、Incident/Timeline/Outbox 初始写入、Incident/Timeline 读取、序号锁定和 ApprovalDecision 一次性事务边界；fake DB 单元测试与本机 psycopg 集成测试覆盖 SQL 写入/读取顺序。审批/Action 领域表仍未接入 Control API。
-- PostgreSQL outbox dispatcher slice：`PostgresOutboxDispatcher` 使用 `FOR UPDATE SKIP LOCKED`、aggregate/sequence 顺序、成功 `published_at` 和失败 `attempt_count/last_error/available_at` 重试；fake DB 单元测试与本机真实发布测试通过。尚未接入 Control API lifespan 后台循环或真实跨进程 crash/restart 测试。
+- PostgreSQL outbox dispatcher slice：`PostgresOutboxDispatcher` 使用 `FOR UPDATE SKIP LOCKED`、aggregate/sequence 顺序、成功 `published_at` 和失败 `attempt_count/last_error/available_at` 重试；fake DB 单元测试、本机真实发布测试及 Control API lifespan 后台循环验证通过。当前 sink 是进程内 SSE/通知边界，尚未完成跨进程发布、crash/restart 对账和外部消息基础设施。
 - Temporal/DB reconciliation contract：Workflow 结果现在记录调查、动作、验证 `workflow_event_refs`；新增 checkpoint reconciler，拒绝 workflow run/event、状态和落后 projection version 漂移，覆盖四类冲突单测。尚未在 Activity 中读取真实 PostgreSQL projection。
 - Full profile 安全边界：Control API 在 `SENTINEL_PROFILE=full` 时执行 PostgreSQL health check、migration，使用 PostgreSQL Incident/Timeline 写入并在启动时重建读模型；缺少 DATABASE_URL、驱动或数据库不可达仍显式 fail-closed，新增生命周期与重启 hydration 集成测试，防止误用本地 SQLite 冒充 full。
 - SQLite projection durable slice：`SQLiteOutboxProjector` 持久化 aggregate sequence、event 去重和 pending 发布状态，覆盖 sink 失败、重启恢复、缺口和旧序号冲突；不等同于 PostgreSQL dispatcher 的租约、并发 claim 或跨服务事务。
