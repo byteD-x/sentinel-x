@@ -17,7 +17,7 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `192 passed`；新增 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、SQLite 审批存储恢复/原子消费、受控 fake Kubernetes 状态/失败注入、六场景 fixture evaluator、SLO 观测窗口和 Temporal durable thin slice 测试，但仍未形成固定 benchmark。
+- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `223 passed`；覆盖 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、SQLite 审批存储恢复/原子消费、受控 fake Kubernetes 状态/失败注入、六场景 fixture evaluator、SLO 观测窗口、Temporal durable thin slice 和版本化 SSE 认证测试，但仍未形成固定 benchmark。
 - 前端门禁：Web Console `npm test -- --run` 为 `24 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
 - Python 轻量门禁：`python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有既存 import/style/type-datetime 规则问题，不能称为完整 lint 通过。
 - 本轮流程收敛：场景启动、审批后执行和 API 启动恢复均通过 `LocalExerciseWorkflow`；审批决定不再直接写入 action/recovery fixture 事件。
@@ -30,7 +30,7 @@
 - 场景 Runner：`python scripts/run_scenario_matrix.py --cycles 3` 已对固定六场景执行 18 次隔离注入/观测/cleanup，并在每轮检查环境 CLEAN；backend 为 in-memory fixture。
 - 固定攻击集：`python scripts/run_security_attack_set.py` 记录 10 个样本、危险拦截率、合法 R1 接受率和 dataset hash；这是 policy/参数静态门禁，不替代 Kubernetes RBAC/网络攻击测试。
 - 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。
-- 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定 benchmark 实测仍未完成；当前仅完成 runner 与本地 fixture 证据包。
+- 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈静态 RBAC 检查与本地 fixture 证据包。
 
 ## 2. Claim 台账
 
