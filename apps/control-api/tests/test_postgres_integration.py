@@ -211,6 +211,26 @@ def test_postgres_store_rebuilds_incident_and_timeline_after_restart():
         assert len(events) == 1
         assert events[0].event_type == "hypothesis.generated"
         assert events[0].payload == {"source": "external-connection"}
+
+        repository.append_event(
+            incident_id=record.id,
+            event_type="recovery.verified",
+            actor_type="WORKFLOW",
+            payload={
+                "result": "passed", "window_seconds": 60,
+                "recovery_actor": "ACTION_GATEWAY",
+            },
+            workflow_event_id="restart-verification-5",
+        )
+        with psycopg.connect(database_url) as connection:
+            verification = connection.execute(
+                "SELECT passed, recovery_actor, observed_window FROM verification_results WHERE incident_id = %s",
+                (str(record.id),),
+            ).fetchone()
+        assert verification is not None
+        assert verification[0] is True
+        assert verification[1] == "ACTION_GATEWAY"
+        assert verification[2]["window_seconds"] == 60
     finally:
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
         admin.close()
