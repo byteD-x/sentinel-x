@@ -162,6 +162,14 @@ class TestHappyPath:
         assert resp2.status_code == 200
         assert resp2.json()["status"] == "succeeded"
 
+    async def test_get_status_by_idempotency_key(self, client):
+        data = _make_request()
+        submitted = await client.post("/api/actions", json=data)
+        assert submitted.status_code == 202
+        response = await client.get(f"/api/actions/by-idempotency/{data['idempotency_key']}")
+        assert response.status_code == 200
+        assert response.json()["execution_id"] == submitted.json()["execution_id"]
+
 
 @pytest.mark.asyncio
 class TestRejections:

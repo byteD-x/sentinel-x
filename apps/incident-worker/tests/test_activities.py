@@ -176,3 +176,41 @@ async def test_full_profile_kubernetes_activity_reads_pod_list(monkeypatch):
     assert result["source_mode"] == "observed"
     assert result["pod_count"] == 2
     assert result["phase_counts"] == {"Running": 1, "Pending": 1}
+
+
+@pytest.mark.asyncio
+async def test_full_profile_action_timeout_reconciles_by_idempotency(monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROFILE", "full")
+    monkeypatch.setenv("SENTINEL_SERVICE_IDENTITY_SECRET", "service-secret")
+    from sentinel_x_incident_worker import activities
+    from urllib.error import URLError
+
+    calls = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, _limit):
+            return b'{"execution_id":"exec-reconciled","status":"running","idempotency_key":"action-idempotency-002"}'
+
+    def fake_urlopen(request, timeout):
+        calls.append(request.full_url)
+        if request.full_url.endswith("/api/actions"):
+            raise URLError("connection reset after submit")
+        assert "/by-idempotency/action-idempotency-002" in request.full_url
+        return Response()
+
+    monkeypatch.setattr(activities, "urlopen", fake_urlopen)
+    result = await submit_action_to_gateway(
+        "http://gateway", "restart_deployment@1", "inventory-api", {},
+        "action-idempotency-002", "approval-token", approval_id="approval-2",
+        plan_hash="plan-hash-123456", incident_id="incident-2",
+        approval_expires_at="2026-08-25T23:30:00+00:00",
+        target_identity={"namespace": "demo-shop", "kind": "Deployment", "name": "inventory-api", "uid": "uid-2", "generation": 1},
+    )
+    assert result["execution_id"] == "exec-reconciled"
+    assert len(calls) == 2

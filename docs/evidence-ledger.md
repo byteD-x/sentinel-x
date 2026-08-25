@@ -41,15 +41,16 @@
 - 场景 Runner：`python scripts/run_scenario_matrix.py --cycles 3` 已对固定六场景执行 18 次隔离注入/观测/cleanup，并在每轮检查环境 CLEAN；backend 为 in-memory fixture。
 - 固定攻击集：`python scripts/run_security_attack_set.py` 记录 10 个样本、危险拦截率、合法 R1 接受率和 dataset hash；这是 policy/参数静态门禁，不替代 Kubernetes RBAC/网络攻击测试。
 - 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。Control API 另有受 session 门控的 light 事故 JSON 导出，递归脱敏并返回内容 SHA-256，不等同于持久异步事故包。
-- Action Gateway PostgreSQL 审批消费切片：`PostgresApprovalStore` 从 `approval_requests + remediation_plans` 读取不可变审批声明，`consume` 使用状态/过期/额度条件更新；本机 PostgreSQL 临时库验证读取、目标身份映射、一次消费、重复消费拒绝和重启后不可再消费。full profile 缺少 PostgreSQL URL/驱动/健康检查失败时 fail-closed。仍未完成 TokenReview、mTLS/服务身份和 ActionExecution PostgreSQL 跨服务事务。
-- ActionExecution PostgreSQL 持久化切片：`PostgresExecutionStore` 将执行登记、幂等键 hash、目标身份、before/after、状态和错误写入 `action_executions`；本机 PostgreSQL 临时库验证幂等读取、状态更新和重启恢复。真实 Kubernetes effect、跨服务 ActionExecution 事务和 reconcile 仍未完成。
+- Action Gateway PostgreSQL 审批消费切片：`PostgresApprovalStore` 从 `approval_requests + remediation_plans` 读取不可变审批声明，`consume` 使用状态/过期/额度条件更新；本机 PostgreSQL 临时库验证读取、目标身份映射、一次消费、重复消费拒绝和重启后不可再消费。full profile 缺少 PostgreSQL URL/驱动/健康检查失败时 fail-closed；另有 control-api 服务签名门禁。正式 TokenReview/mTLS、ActionExecution PostgreSQL 跨服务事务仍未完成。
+- ActionExecution PostgreSQL 持久化切片：`PostgresExecutionStore` 将执行登记、runbook_ref、opaque 幂等键及其 hash、目标身份、before/after、状态和错误写入 `action_executions`；本机 PostgreSQL 临时库验证幂等读取、状态更新和重启恢复。真实 Kubernetes effect、跨服务 ActionExecution 事务和 crash reconcile 仍未完成。
 - Action Gateway 服务身份切片：full `/api/actions` 要求 `control-api` 服务名、时间戳和 HMAC 签名，启动时缺少服务身份密钥 fail-closed；接口测试覆盖缺失和有效签名。该机制是本地服务签名边界，不等同于 Kubernetes TokenReview/mTLS。
+- Action timeout reconcile 切片：Gateway 新增按 opaque 幂等键查询 ActionExecution 的兼容端点；Worker 在 POST 网络异常后使用同一服务签名查询已登记执行，避免在状态未知时生成新幂等键。当前仍未覆盖真实网络分区、跨服务事务和 crash/restart E2E。
 - VerificationResult PostgreSQL 持久化切片：`recovery.verified` Timeline 事件在同一领域事务中追加 `verification_results`，保存 `passed`、`recovery_actor`、SLO policy、threshold、baseline/observed window 和 failure reason；本机 PostgreSQL 重启集成验证通过。SLO 数值仍需真实来源输入。
 - Incident Worker adapter 切片：full profile 的 Prometheus/Loki/Tempo Activity 已通过受限 `HttpTelemetrySource` 执行启动时配置的 HTTP 查询，Kubernetes Activity 已通过固定 namespace 的只读 PodList HTTP 查询，均返回 `source_mode=observed` 和 payload hash；SLO Activity 解析 Prometheus p99（秒转毫秒）并按 observed window 判定；Action Activity 已通过带时间窗 HMAC 服务签名调用 `/api/actions` 并要求审批/目标身份字段，Temporal ActionRequest 已传递 plan hash、审批过期时间和目标身份。缺任一来源或后端失败即拒绝，light profile 仍保留 fixture。真实集群 RBAC/API E2E 和 Temporal/DB 全链路 ActionExecution 对账仍未完成。
 - full API CSRF 切片：`/api/v1` 状态变更在 `SENTINEL_PROFILE=full` 下要求 `X-CSRF-Token = HMAC(session_signing_key, "csrf:" + Authorization)`；测试覆盖缺失 token 403 与有效 token 202。该机制保护 local-session 原型，不等同于 OIDC/浏览器正式会话或服务身份认证。
 - full API idempotency 切片：`/api/v1` POST/PUT/PATCH/DELETE 在 full profile 要求 16–128 字符 `Idempotency-Key`，通过 PostgreSQL `idempotency_records` 原子预留并持久化成功响应；同 key 同 body 可跨进程重放，body 冲突返回 409，并发处理中返回 409。进程内缓存仍作为 light/未初始化 full 的兼容路径；崩溃发生在副作用完成与响应落库之间的窗口仍需 reconcile。
-- 正式 Approval Resource 切片：full `/api/v1/approval-requests` 列表、详情和 decision 路由已接入签名 session、CSRF、Idempotency-Key、If-Match、plan hash 与一次性 PostgreSQL decision；重启读取保留客户端 plan_id、创建/决定时间和决定人。仍未完成 OIDC/服务身份与跨进程幂等记录。
-- 限制：full Kubernetes/observability E2E、TokenReview/服务身份和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈与 Kubernetes 权限清单静态检查及本地 fixture 证据包。
+- 正式 Approval Resource 切片：full `/api/v1/approval-requests` 列表、详情和 decision 路由已接入签名 session、CSRF、持久 PostgreSQL `Idempotency-Key`、If-Match、plan hash 与一次性 PostgreSQL decision；重启读取保留客户端 plan_id、创建/决定时间和决定人。仍未完成 OIDC/正式 TokenReview/mTLS 与副作用崩溃窗口 reconcile。
+- 限制：full Kubernetes/observability E2E、正式 TokenReview/mTLS、跨服务事务、固定 benchmark 实测和远端 CI 证据仍未完成；当前已完成受限 HTTP adapter、runner、观测栈与 Kubernetes 权限清单静态检查及本地 fixture 证据包。
 
 ## 2. Claim 台账
 

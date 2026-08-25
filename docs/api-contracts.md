@@ -36,7 +36,8 @@ Alertmanager 请求使用独立 HMAC 密钥和 headers：
 - Gateway 通过 TokenReview 验证身份与 audience，并只接受 `incident-worker` ServiceAccount。
 - 请求只携带 `approval_id`；Gateway 使用独立数据库权限读取并原子消费不可变审批记录，不接受 Worker 自带的“已批准”声明或共享审批 bearer。
 
-该方案为 `proposed`，在 M0 安全 spike 后以 ADR 固定。
+该方案仍为 `proposed`；当前本地实现使用带时间窗的 `X-Sentinel-Service-Name/Timestamp/Signature`
+HMAC 边界，尚未实现 Kubernetes TokenReview/mTLS。
 
 ## 3. 公共 headers 与媒体类型
 
@@ -289,7 +290,8 @@ Gateway 不接受 plan body 作为授权事实。它从数据库读取 plan/appr
 - 412：审批/目标状态漂移。
 - 403：策略、risk 或 kill switch 拒绝。
 
-请求超时后 Worker 必须用同一幂等键查询，不生成新 key。
+请求超时后 Worker 必须用同一幂等键查询，不生成新 key。当前兼容路径为
+`GET /api/actions/by-idempotency/{idempotency_key}`，full profile 同样要求服务身份签名。
 
 ### `GET /internal/v1/actions/{id}`
 

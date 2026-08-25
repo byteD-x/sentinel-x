@@ -820,6 +820,32 @@ async def get_action_status(execution_id: str):
     )
 
 
+@app.get("/api/actions/by-idempotency/{idempotency_key}")
+async def get_action_by_idempotency(
+    idempotency_key: str,
+    service_name: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Name"),
+    service_timestamp: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Timestamp"),
+    service_signature: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Signature"),
+):
+    """按 opaque 幂等键协调提交超时，full profile 仍要求服务身份。"""
+    identity_error = _service_identity_error(
+        service_name=service_name, timestamp=service_timestamp, signature=service_signature
+    )
+    if identity_error:
+        raise HTTPException(status_code=401, detail=identity_error)
+    execution = store.check_idempotency(idempotency_key)
+    if not execution:
+        raise HTTPException(status_code=404, detail="幂等键对应的执行不存在")
+    return ActionStatusResponse(
+        execution_id=execution.execution_id, status=execution.status,
+        runbook_ref=execution.runbook_ref, target=execution.target,
+        idempotency_key=execution.idempotency_key, before_state=execution.before_state,
+        after_state=execution.after_state, output=execution.output, error=execution.error,
+        started_at=execution.started_at, completed_at=execution.completed_at,
+        execution_mode=execution.execution_mode,
+    )
+
+
 @app.get("/api/runbooks")
 async def list_runbooks():
     """列出所有已登记的 Runbook。"""

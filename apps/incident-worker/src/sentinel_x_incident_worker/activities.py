@@ -423,6 +423,45 @@ async def submit_action_to_gateway(
         if not isinstance(result, dict) or not result.get("execution_id"):
             raise RuntimeError("Action Gateway 返回缺少 execution_id")
         return result
+    try:
+        return await asyncio.to_thread(call)
+    except RuntimeError as exc:
+        if "HTTP 调用失败" not in str(exc):
+            raise
+        return await check_action_status_by_idempotency(
+            action_gateway_url, idempotency_key, timeout_seconds
+        )
+
+
+async def check_action_status_by_idempotency(
+    action_gateway_url: str, idempotency_key: str, timeout_seconds: int = 30
+) -> dict:
+    """POST 超时后的幂等协调查询。"""
+    secret = os.getenv("SENTINEL_SERVICE_IDENTITY_SECRET", "")
+    if not secret:
+        raise RuntimeError("full profile Action Gateway adapter 缺少服务身份密钥")
+    timestamp = str(int(datetime.now().timestamp()))
+    signature = "sha256=" + hmac.new(
+        secret.encode("utf-8"), f"control-api:{timestamp}".encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    request = Request(
+        action_gateway_url.rstrip("/") + "/api/actions/by-idempotency/" + quote(idempotency_key, safe=""),
+        headers={
+            "Accept": "application/json", "X-Sentinel-Service-Name": "control-api",
+            "X-Sentinel-Service-Timestamp": timestamp,
+            "X-Sentinel-Service-Signature": signature,
+        }, method="GET",
+    )
+
+    def call() -> dict:
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                result = json.loads(response.read(1024 * 1024))
+        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Action Gateway 幂等协调查询失败") from exc
+        if not isinstance(result, dict) or result.get("idempotency_key") != idempotency_key:
+            raise RuntimeError("Action Gateway 幂等协调响应不匹配")
+        return result
 
     return await asyncio.to_thread(call)
 
