@@ -1,6 +1,8 @@
 import pytest
+from fastapi import FastAPI
 
 from sentinel_x_control_api.config import Settings
+from sentinel_x_control_api.app import lifespan
 
 
 def test_light_profile_keeps_local_defaults():
@@ -28,3 +30,12 @@ def test_full_profile_requires_postgres_and_security_configuration():
     values["database_url"] = "postgresql://control:secret@db/sentinel"
     settings = Settings(_env_file=None, **values)
     assert settings.sentinel_profile == "full"
+
+
+@pytest.mark.asyncio
+async def test_full_profile_lifespan_fails_closed_before_local_fallback(monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROFILE", "full")
+
+    with pytest.raises(RuntimeError, match="PostgreSQL repository/projection"):
+        async with lifespan(FastAPI()):
+            pytest.fail("full profile 不应回退到本地 SQLite")

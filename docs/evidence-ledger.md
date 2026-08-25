@@ -26,6 +26,7 @@
 - Action Gateway 审批持久化切片：新增 SQLite 审批记录、不可变登记、重启恢复、撤销和 SQL 条件更新原子消费；这是本地 durable backend，不等同于 full profile PostgreSQL migration/outbox 或跨服务事务。
 - Action Gateway 执行器切片：新增可替换执行器边界和受控 fake Kubernetes Deployment API，验证 restart/scale、UID/generation 漂移、ready 状态及 timeout/partial-ready/unknown；仅为隔离测试实现，不等同于真实 Kubernetes API 或 full profile。
 - PostgreSQL migration runner：`python scripts/migrate_postgres.py --database-url ...` 已实现版本顺序、checksum 漂移拒绝、重复执行幂等和 `SELECT 1` fail-closed 健康检查；单元测试覆盖 fake connection。当前环境没有 Docker/PostgreSQL，未形成真实数据库 migration/约束集成证据。
+- Full profile 安全边界：Control API 在 `SENTINEL_PROFILE=full` 且 PostgreSQL repository/projection 尚未接线时显式 fail-closed；新增生命周期测试，防止误用本地 SQLite 冒充 full。
 - 隔离 full profile 切片：Action Gateway 通过 `SENTINEL_EXECUTION_MODE=fake-k8s` 显式选择受控 fake Kubernetes 执行器，并为 demo-shop Deployment 注册固定身份；默认仍为 fixture 且 kill switch 默认开启。该切片支持 API 级 before/after 状态证据，不等同于真实集群写入。
 - 固定评测 CLI：`python scripts/run_evaluation.py` 生成 B0/B1/C1 三套本地报告、manifest 和 checksums；holdout 强制每场景至少 10 次。报告仍标记 `light-fixture`，不可用于生产效果或准确率声明。
 - 场景 Runner：`python scripts/run_scenario_matrix.py --cycles 3` 已对固定六场景执行 18 次隔离注入/观测/cleanup，并在每轮检查环境 CLEAN；backend 为 in-memory fixture。
