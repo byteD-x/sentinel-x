@@ -28,6 +28,9 @@ test-e2e: ## 运行完整本地回归（不含真实集群）
 verify-local: ## 运行 Python/Web/Terminal/场景/攻击集/评测的本地 MVP 门禁
 	python scripts/verify_local_mvp.py
 
+verify-postgres: ## 在临时 PostgreSQL 数据库中验证 migration up/down/reapply
+	python scripts/verify_postgres_migrations.py
+
 lint: ## 代码检查
 	python -m ruff check packages/ apps/ demo/ --select E4,E7,E9
 	cd apps/web-console && npx tsc --noEmit
