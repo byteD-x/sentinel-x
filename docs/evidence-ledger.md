@@ -42,7 +42,7 @@
 - 固定攻击集：`python scripts/run_security_attack_set.py` 记录 10 个样本、危险拦截率、合法 R1 接受率和 dataset hash；这是 policy/参数静态门禁，不替代 Kubernetes RBAC/网络攻击测试。
 - 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。Control API 另有受 session 门控的 light 事故 JSON 导出，递归脱敏并返回内容 SHA-256，不等同于持久异步事故包。
 - Action Gateway PostgreSQL 审批消费切片：`PostgresApprovalStore` 从 `approval_requests + remediation_plans` 读取不可变审批声明，`consume` 使用状态/过期/额度条件更新；本机 PostgreSQL 临时库验证读取、目标身份映射、一次消费、重复消费拒绝和重启后不可再消费。full profile 缺少 PostgreSQL URL/驱动/健康检查失败时 fail-closed；另有 control-api 服务签名门禁。正式 TokenReview/mTLS、ActionExecution PostgreSQL 跨服务事务仍未完成。
-- ActionExecution PostgreSQL 持久化切片：`PostgresExecutionStore` 将执行登记、runbook_ref、opaque 幂等键及其 hash、目标身份、before/after、状态和错误写入 `action_executions`；本机 PostgreSQL 临时库验证幂等读取、状态更新和重启恢复。真实 Kubernetes effect、跨服务 ActionExecution 事务和 crash reconcile 仍未完成。
+- ActionExecution PostgreSQL 持久化切片：`PostgresExecutionStore` 将执行登记、runbook_ref、opaque 幂等键及其 hash、目标身份、before/after、状态和错误写入 `action_executions`；登记使用唯一幂等键的 `ON CONFLICT DO NOTHING`，重复登记返回既有执行而不覆盖原记录，本机 PostgreSQL 临时库验证幂等读取、重复登记、状态更新和重启恢复。真实 Kubernetes effect、跨服务 ActionExecution 事务和 crash reconcile 仍未完成。
 - Action Gateway 服务身份切片：full `/api/actions` 要求 `control-api` 服务名、时间戳和 HMAC 签名，启动时缺少服务身份密钥 fail-closed；接口测试覆盖缺失和有效签名。该机制是本地服务签名边界，不等同于 Kubernetes TokenReview/mTLS。
 - Action timeout reconcile 切片：Gateway 新增按 opaque 幂等键查询 ActionExecution 的兼容端点；Worker 在 POST 网络异常后使用同一服务签名查询已登记执行，避免在状态未知时生成新幂等键。当前仍未覆盖真实网络分区、跨服务事务和 crash/restart E2E。
 - VerificationResult PostgreSQL 持久化切片：`recovery.verified` Timeline 事件在同一领域事务中追加 `verification_results`，保存 `passed`、`recovery_actor`、SLO policy、threshold、baseline/observed window 和 failure reason；本机 PostgreSQL 重启集成验证通过。SLO 数值仍需真实来源输入。

@@ -66,8 +66,19 @@ def test_postgres_execution_store_persists_idempotency_and_status():
                 uid="fake-payment-api", generation=1,
             ),
         )
-        store.create(execution)
+        assert store.create(execution) is True
         assert store.check_idempotency(execution.idempotency_key).execution_id == execution.execution_id
+        duplicate = StoredExecution(
+            execution_id=str(uuid4()), approval_id=execution.approval_id,
+            incident_id=execution.incident_id, plan_id=execution.plan_id,
+            status="running", runbook_ref=execution.runbook_ref, target=execution.target,
+            idempotency_key=execution.idempotency_key, before_state="other",
+            started_at=datetime.now(UTC), execution_mode="fake-k8s",
+            target_identity=execution.target_identity,
+        )
+        reopened_store = PostgresExecutionStore(lambda: psycopg.connect(database_url))
+        assert reopened_store.create(duplicate) is False
+        assert reopened_store.check_idempotency(execution.idempotency_key).execution_id == execution.execution_id
         store.update(execution.execution_id, status="succeeded", after_state="after")
         restarted = PostgresExecutionStore(lambda: psycopg.connect(database_url))
         restored = restarted.get(execution.execution_id)

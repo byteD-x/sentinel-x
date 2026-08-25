@@ -45,7 +45,7 @@
 当前阻塞：
 
 - Control API 已提供 `/api/v1`、local-only 短期 HMAC session、full mutation 的 CSRF 双提交校验、body 绑定 Idempotency-Key 和 ETag/If-Match；light 仍使用 SQLite outbox，full profile 已接入 PostgreSQL Incident/Timeline/Approval 写入、权威时间线读取、审批一次性决定、正式 approval-requests 资源路由、持久幂等响应记录与启动读模型重建，仍缺 OIDC/TokenReview、Action 跨服务授权事务和副作用崩溃窗口 reconcile。
-- Action Gateway 已默认 fail-closed，并校验 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份、一次性消费和 full profile control-api 服务签名；新增按 opaque 幂等键的超时协调查询，light SQLite backend 与 full PostgreSQL 权威审批读取/条件消费、ActionExecution 重启元数据恢复均已覆盖验证，仍缺正式 TokenReview/mTLS、跨服务事务和真实网络分区 E2E。
+- Action Gateway 已默认 fail-closed，并校验 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份、一次性消费和 full profile control-api 服务签名；新增按 opaque 幂等键的超时协调查询，full PostgreSQL ActionExecution 登记使用唯一幂等键原子冲突处理并复用既有执行，light SQLite backend 与 full PostgreSQL 权威审批读取/条件消费、ActionExecution 重启元数据恢复均已覆盖验证，仍缺正式 TokenReview/mTLS、跨服务事务和真实网络分区 E2E。
 - Alert Ingress 已校验时间戳、nonce、HMAC 和有界 body，并提供版本化 Alertmanager webhook 转换；full profile 已使用 PostgreSQL 唯一约束和原子事务持久化 nonce claim，active fingerprint 也通过部分唯一索引与原子冲突处理保证并发告警复用同一 Incident，真实 Alertmanager/观测栈联调仍未完成。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
 - light Workflow fixture 的动作执行仍是模拟路径，但恢复结论已改为读取受控观测样本；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal、Worker restart 和 history replay。

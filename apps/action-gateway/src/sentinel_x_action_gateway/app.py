@@ -233,10 +233,11 @@ class ExecutionStore:
         """审批只能用于登记一次动作。"""
         return approval_id in self._consumed_approval_ids
 
-    def create(self, execution: StoredExecution) -> None:
+    def create(self, execution: StoredExecution) -> bool:
         self._executions[execution.execution_id] = execution
         self._idempotency_keys.add(execution.idempotency_key)
         self._consumed_approval_ids.add(execution.approval_id)
+        return True
 
     def get(self, execution_id: str) -> Optional[StoredExecution]:
         return self._executions.get(execution_id)
@@ -305,7 +306,7 @@ class PostgresExecutionStore:
     def get(self, execution_id: str) -> StoredExecution | None:
         return self._load("id = %s", (execution_id,))
 
-    def create(self, execution: StoredExecution) -> None:
+    def create(self, execution: StoredExecution) -> bool:
         if not execution.target_identity:
             raise ValueError("PostgreSQL ActionExecution 缺少 target_identity")
         identity = execution.target_identity
@@ -322,6 +323,7 @@ class PostgresExecutionStore:
                             target_observed_generation, before_state_ref, started_at
                             , target_resource_version
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                        ON CONFLICT (idempotency_key_hash) DO NOTHING
                         """,
                         (
                             execution.execution_id, execution.incident_id, execution.plan_id,
@@ -333,6 +335,7 @@ class PostgresExecutionStore:
                             execution.started_at, execution.target_resource_version,
                         ),
                     )
+                    return cursor.rowcount == 1
         finally:
             connection.close()
 
@@ -607,7 +610,11 @@ class ActionGate:
                 execution_mode=self.executor.execution_mode,
                 target_identity=req.target_identity,
             )
-            self.store.create(execution)
+            if not self.store.create(execution):
+                existing = self.store.check_idempotency(req.idempotency_key)
+                if existing:
+                    return existing
+                raise RuntimeError("幂等登记冲突后未找到既有执行")
             return execution
 
         execution = StoredExecution(
@@ -624,7 +631,11 @@ class ActionGate:
             execution_mode=self.executor.execution_mode,
             target_identity=req.target_identity,
         )
-        self.store.create(execution)
+        if not self.store.create(execution):
+            existing = self.store.check_idempotency(req.idempotency_key)
+            if existing:
+                return existing
+            raise RuntimeError("幂等登记冲突后未找到既有执行")
 
         try:
             result: ActionExecutionResult = self.executor.execute(
