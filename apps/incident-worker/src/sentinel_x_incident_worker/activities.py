@@ -19,6 +19,8 @@ from sentinel_x_incident_worker.reconciliation import (
     ProjectionCheckpoint,
     reconcile_checkpoint,
 )
+from sentinel_x_diagnostics import DiagnosticToolType
+from sentinel_x_diagnostics.sources import HttpTelemetrySource, TelemetrySourceError
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,46 @@ def _require_real_full_adapter(capability: str) -> None:
         raise RuntimeError(
             f"full profile 未配置真实 {capability} adapter；禁止使用 fixture Activity"
         )
+
+
+def _telemetry_source() -> HttpTelemetrySource:
+    urls = {
+        "prometheus": os.getenv("PROMETHEUS_BASE_URL", ""),
+        "loki": os.getenv("LOKI_BASE_URL", ""),
+        "tempo": os.getenv("TEMPO_BASE_URL", ""),
+    }
+    if not all(urls.values()):
+        raise RuntimeError("full profile 未配置 Prometheus adapter（需同时配置 Loki/Tempo）")
+    return HttpTelemetrySource(
+        prometheus_base_url=urls["prometheus"],
+        loki_base_url=urls["loki"],
+        tempo_base_url=urls["tempo"],
+        timeout_seconds=float(os.getenv("TELEMETRY_TIMEOUT_SECONDS", "3")),
+    )
+
+
+def _observed_evidence(source: HttpTelemetrySource, tool: DiagnosticToolType, params: dict, query: str) -> dict:
+    try:
+        response = source.query(tool, params)
+    except TelemetrySourceError:
+        raise
+    payload = response.payload
+    if payload.get("status") not in {None, "success"}:
+        raise RuntimeError(f"{tool.value} adapter 返回失败状态")
+    payload_hash = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return {
+        "evidence_id": str(uuid4()),
+        "source": tool.value,
+        "source_ref": response.source_ref,
+        "source_mode": "observed",
+        "query": query,
+        "summary": f"{tool.value} 真实来源查询成功",
+        "raw_hash": payload_hash,
+        "collected_at": datetime.now().isoformat(),
+        "truncated": False,
+    }
 
 
 async def reconcile_postgres_projection(
@@ -96,17 +138,18 @@ async def collect_prometheus_evidence(
 
     超时: 30s, 重试: 最多 2 次（瞬态网络错误）
     """
-    _require_real_full_adapter("Prometheus")
-    await asyncio.sleep(0.2)
-    return {
-        "evidence_id": str(uuid4()),
-        "source": "prometheus",
-        "query": query,
-        "summary": f"PromQL 查询结果摘要（窗口: {time_range_minutes}min）",
-        "raw_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
-        "collected_at": datetime.now().isoformat(),
-        "truncated": False,
-    }
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        await asyncio.sleep(0.2)
+        return {
+            "evidence_id": str(uuid4()), "source": "prometheus", "query": query,
+            "summary": f"PromQL 查询结果摘要（窗口: {time_range_minutes}min）",
+            "raw_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
+            "collected_at": datetime.now().isoformat(), "truncated": False,
+        }
+    return await asyncio.to_thread(
+        _observed_evidence, _telemetry_source(), DiagnosticToolType.QUERY_PROMETHEUS,
+        {"query": query, "time_range_minutes": time_range_minutes}, query,
+    )
 
 
 async def collect_loki_evidence(
@@ -120,17 +163,18 @@ async def collect_loki_evidence(
     超时: 30s, 重试: 最多 2 次
     结果自动脱敏。
     """
-    _require_real_full_adapter("Loki")
-    await asyncio.sleep(0.2)
-    return {
-        "evidence_id": str(uuid4()),
-        "source": "loki",
-        "query": query,
-        "summary": f"LogQL 查询结果摘要（{limit} 条日志）",
-        "raw_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
-        "collected_at": datetime.now().isoformat(),
-        "truncated": False,
-    }
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        await asyncio.sleep(0.2)
+        return {
+            "evidence_id": str(uuid4()), "source": "loki", "query": query,
+            "summary": f"LogQL 查询结果摘要（{limit} 条日志）",
+            "raw_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
+            "collected_at": datetime.now().isoformat(), "truncated": False,
+        }
+    return await asyncio.to_thread(
+        _observed_evidence, _telemetry_source(), DiagnosticToolType.QUERY_LOKI,
+        {"query": query, "limit": limit, "time_range_minutes": time_range_minutes}, query,
+    )
 
 
 async def collect_tempo_evidence(
@@ -143,17 +187,19 @@ async def collect_tempo_evidence(
 
     超时: 30s, 重试: 最多 1 次
     """
-    _require_real_full_adapter("Tempo")
-    await asyncio.sleep(0.2)
-    return {
-        "evidence_id": str(uuid4()),
-        "source": "tempo",
-        "query": f"trace_id={trace_id or 'auto'} service={service_name or 'auto'}",
-        "summary": "Trace 查询结果摘要",
-        "raw_hash": hashlib.sha256(f"{trace_id}{service_name}".encode()).hexdigest()[:16],
-        "collected_at": datetime.now().isoformat(),
-        "truncated": False,
-    }
+    query = f"trace_id={trace_id or 'auto'} service={service_name or 'auto'}"
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        await asyncio.sleep(0.2)
+        return {
+            "evidence_id": str(uuid4()), "source": "tempo", "query": query,
+            "summary": "Trace 查询结果摘要",
+            "raw_hash": hashlib.sha256(f"{trace_id}{service_name}".encode()).hexdigest()[:16],
+            "collected_at": datetime.now().isoformat(), "truncated": False,
+        }
+    return await asyncio.to_thread(
+        _observed_evidence, _telemetry_source(), DiagnosticToolType.QUERY_TEMPO,
+        {"trace_id": trace_id, "service_name": service_name or "unknown", "time_range_minutes": time_range_minutes}, query,
+    )
 
 
 async def collect_k8s_pod_status(
