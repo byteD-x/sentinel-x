@@ -19,6 +19,7 @@ fixture、静态契约或本地测试升级成真实 full profile 证据。
 | Kubernetes security manifests | STATIC-TESTED | 诊断只读、执行 Deployment 白名单、Chaos ingress 端口约束；`python -m pytest -q infra/tests`；未替代集群 API `can-i` |
 | Security | TESTED | 10 个固定攻击样本，危险拦截率 100%，合法 R1 接受率 100% |
 | Evidence | TESTED | manifest/checksums/敏感扫描/verification report |
+| Incident export | TESTED/PARTIAL | v1 session 门控、递归脱敏、大小上限、内容 SHA-256；仅 light 同步 JSON，不是持久异步导出 |
 
 ## 仍未达到 full MVP DoD
 

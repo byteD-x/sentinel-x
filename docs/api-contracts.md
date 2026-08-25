@@ -179,7 +179,7 @@ MVP 命令：`CONTINUE_INVESTIGATION`、`ESCALATE_TO_HUMAN`、`CANCEL_PENDING_PL
 - `GET /incidents/{id}/evidence`：按类型/时间分页，默认只返回摘要和 source_ref。
 - `GET /incidents/{id}/hypotheses`：返回版本历史和支持/反对 Evidence IDs。
 - `GET /incidents/{id}/timeline`：按 `(sequence, id)` 游标稳定分页。
-- `GET /incidents/{id}/export`：异步生成脱敏事故包，返回 operation；viewer+ 可下载，包有 hash 和过期。
+- `GET /incidents/{id}/export`：目标契约是异步生成脱敏事故包并返回 operation；当前 light 实现提供受 session 门控的 `GET /api/v1/incidents/{id}/export`，同步返回受大小限制的 JSON 包，包含 `schema_version`、`profile`、`source_mode`、时间线、审批摘要和 `manifest.content_sha256`。它不提供 PostgreSQL 持久 operation、过期下载或真实遥测内容。
 
 原始遥测链接必须经过 allowlist proxy 或打开已配置 Grafana/Tempo 来源，不能接受模型生成 URL。
 

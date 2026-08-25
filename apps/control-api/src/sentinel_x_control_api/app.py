@@ -7,6 +7,7 @@ Sentinel-X Control API — 主应用入口。
 - POST /api/incidents — 创建事故（Alert Ingress）
 - GET  /api/incidents/{id} — 事故详情
 - GET  /api/incidents/{id}/timeline — 事故时间线
+- GET  /api/incidents/{id}/export — 脱敏事故包（light）
 - GET  /api/incidents/{id}/evidence — 证据列表
 - GET  /api/incidents/{id}/hypotheses — 假设列表
 - POST /api/incidents/{id}/approvals — 创建审批
@@ -22,6 +23,7 @@ import hmac
 import json
 import os
 import random
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -65,6 +67,7 @@ from sentinel_x_control_api.local_workflow import LocalExerciseWorkflow
 
 EVAL_ARCHIVE_DIR = Path(os.getenv("SENTINEL_EVAL_ARCHIVE_DIR", "evals/results"))
 EVAL_ARCHIVE_MAX_BYTES = int(os.getenv("SENTINEL_EVAL_ARCHIVE_MAX_BYTES", "2097152"))
+INCIDENT_EXPORT_MAX_BYTES = int(os.getenv("SENTINEL_INCIDENT_EXPORT_MAX_BYTES", "1048576"))
 SCENARIOS_DIR = Path(__file__).resolve().parents[4] / "demo" / "scenarios"
 
 
@@ -73,6 +76,85 @@ def _evaluation_archive_error_response(error: EvaluationArchiveError) -> JSONRes
         status_code=error.status_code,
         content={"detail": error.detail, "code": error.code},
     )
+
+
+_EXPORT_SENSITIVE_KEY = re.compile(
+    r"(?:authorization|cookie|api[_-]?key|token|secret|password)", re.IGNORECASE
+)
+_EXPORT_TOKEN = re.compile(r"(?:Bearer\s+|sk-|eyJ|ghp_|xox[baprs]-)[A-Za-z0-9._~+/=-]{12,}")
+_EXPORT_KEY_VALUE = re.compile(
+    r"(api[_-]?key|apikey|token|secret|password)\s*[:=]\s*\S+",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_export_value(value):
+    """递归脱敏导出字段，保留结构但不携带凭据或原始令牌。"""
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                "[REDACTED]"
+                if _EXPORT_SENSITIVE_KEY.search(str(key))
+                else _sanitize_export_value(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_export_value(item) for item in value]
+    if isinstance(value, str):
+        return _EXPORT_KEY_VALUE.sub(r"\1: [REDACTED]", _EXPORT_TOKEN.sub("[REDACTED]", value))
+    return value
+
+
+def _build_incident_export(incident: "StoredIncident", approvals: list[dict]) -> dict:
+    """构建 light 事故包；哈希覆盖 manifest 之外的规范化内容。"""
+    payload = {
+        "schema_version": "1.0",
+        "export_id": f"incident-export-{incident.id}-v{incident.version}",
+        "generated_at": datetime.now().isoformat(),
+        "profile": "local-isolated-fixture",
+        "source_mode": "fixture",
+        "incident": _sanitize_export_value({
+            "id": incident.id,
+            "fingerprint": incident.fingerprint,
+            "status": incident.status.value,
+            "severity": incident.severity.value,
+            "alert_name": incident.alert_name,
+            "description": incident.description,
+            "created_at": incident.created_at.isoformat(),
+            "updated_at": incident.updated_at.isoformat(),
+            "resolved_at": incident.resolved_at.isoformat() if incident.resolved_at else None,
+            "workflow_id": incident.workflow_id,
+            "version": incident.version,
+        }),
+        "timeline": [
+            _sanitize_export_value({
+                "id": event.id,
+                "sequence": event.sequence,
+                "event_type": event.event_type,
+                "actor": event.actor,
+                "payload": event.payload,
+                "timestamp": event.timestamp.isoformat(),
+            })
+            for event in incident.timeline
+        ],
+        "approvals": [
+            _sanitize_export_value(approval)
+            for approval in approvals
+            if approval.get("incident_id") == incident.id
+        ],
+    }
+    content = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    content_bytes = len(content.encode("utf-8"))
+    if content_bytes > INCIDENT_EXPORT_MAX_BYTES:
+        raise ValueError("事故包超过导出大小上限")
+    payload["manifest"] = {
+        "content_sha256": f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
+        "content_bytes": content_bytes,
+        "timeline_events": len(payload["timeline"]),
+        "approvals": len(payload["approvals"]),
+    }
+    return payload
 
 
 def _load_scenario_definitions() -> dict[str, ScenarioDefinition]:
@@ -1307,6 +1389,18 @@ async def get_timeline(
     }
 
 
+@app.get("/api/incidents/{incident_id}/export")
+async def export_incident(incident_id: str):
+    """导出 light 事故包；只返回脱敏 JSON，不接受文件路径或下载参数。"""
+    incident = store.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
+    try:
+        return _build_incident_export(incident, store.list_approvals(incident_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
+
 # ---- 审批 ----
 
 @app.post("/api/incidents/{incident_id}/approvals", status_code=status.HTTP_201_CREATED)
@@ -1712,6 +1806,7 @@ app.add_api_route("/api/v1/incidents", list_incidents, methods=["GET"], response
 app.add_api_route("/api/v1/incidents/{incident_id}", get_incident, methods=["GET"], response_model=IncidentOverviewResponse, dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/timeline", get_timeline, methods=["GET"], dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/stream", stream_incident, methods=["GET"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/incidents/{incident_id}/export", export_incident, methods=["GET"], dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/approvals", request_approval, methods=["POST"], status_code=201, dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/approvals/{approval_id}", decide_approval, methods=["PUT"], dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/approvals", list_approvals, methods=["GET"], dependencies=_v1_auth)
