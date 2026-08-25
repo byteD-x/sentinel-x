@@ -1,4 +1,4 @@
-.PHONY: help install test lint clean doctor demo-up demo-down
+.PHONY: help install test test-e2e verify-local lint clean doctor demo-up demo-down
 
 help: ## 显示帮助
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -24,6 +24,9 @@ test: ## 运行快速质量门禁
 
 test-e2e: ## 运行完整本地回归（不含真实集群）
 	python -m pytest -q --tb=short --asyncio-mode=auto
+
+verify-local: ## 运行 Python/Web/Terminal/场景/攻击集/评测的本地 MVP 门禁
+	python scripts/verify_local_mvp.py
 
 lint: ## 代码检查
 	python -m ruff check packages/ apps/ demo/ --select E4,E7,E9

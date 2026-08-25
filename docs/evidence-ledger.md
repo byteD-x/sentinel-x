@@ -17,7 +17,7 @@
 当前主要证据：
 
 - 代码定位：`apps/`、`packages/`、`demo/`、`evals/`、`infra/` 已有实现或配置。
-- 本地门禁：`python -m pytest -q`，2026-08-25（Windows，本地 light）结果为 `225 passed`；覆盖 Alert Ingress nonce replay 拒绝、审批 policy/plan hash 服务器端重算、非法目标/篡改、工作流恢复、SQLite 审批存储恢复/原子消费、受控 fake Kubernetes 状态/失败注入、六场景 fixture evaluator、SLO 观测窗口、Temporal durable thin slice、版本化 SSE 认证和脱敏事故导出测试，但仍未形成固定 benchmark。
+- 本地门禁：`python scripts/verify_local_mvp.py --scenario-cycles 3 --evaluation-runs 3`，2026-08-25（Windows，本地 light）结果为 Python `226 passed`；同时通过轻量 Ruff、Web Console `24 passed`/lint/build/UI contract、Terminal Console `7 passed`/build、六场景 3 轮 cleanup、固定攻击集和 B0/B1/C1 fixture 评测。原始汇总为 `evidence/local-mvp/verification-report.json`（该目录被忽略，不作为发布产物提交）；仍未形成真实 full profile benchmark。
 - 前端门禁：Web Console `npm test -- --run` 为 `24 passed`，`npm run build` 与 `npm run lint` 通过；Terminal Console `npm test -- --run` 为 `7 passed`，`npm run build` 通过。
 - Python 轻量门禁：`python -m ruff check packages/ apps/ demo/ --select E4,E7,E9` 通过；完整 Ruff 仍有既存 import/style/type-datetime 规则问题，不能称为完整 lint 通过。
 - 本轮流程收敛：场景启动、审批后执行和 API 启动恢复均通过 `LocalExerciseWorkflow`；审批决定不再直接写入 action/recovery fixture 事件。

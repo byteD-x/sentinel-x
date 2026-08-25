@@ -52,3 +52,21 @@ def test_injection_rejects_non_demo_namespace(scenarios):
 
     with pytest.raises(ScenarioRunnerError, match="demo-shop"):
         InMemoryScenarioBackend().inject(scenario)
+
+
+def test_partial_injection_failure_still_runs_cleanup(scenarios):
+    scenario = scenarios[0]
+
+    class PartiallyFailingBackend(InMemoryScenarioBackend):
+        def inject(self, scenario):
+            self.active[scenario.id] = {"partial": True}
+            raise RuntimeError("注入过程失败")
+
+    backend = PartiallyFailingBackend()
+    result = ScenarioRunner(backend).run_cycle(scenario, cycle=1)
+
+    assert not result.injected
+    assert result.cleaned
+    assert result.environment_clean
+    assert result.error == "注入过程失败"
+    assert backend.cleanup_calls[scenario.id] == 1
