@@ -40,6 +40,7 @@ class ApprovalRecord:
     audience: str
     expires_at: datetime
     target_identity: TargetIdentity
+    plan_id: str = ""
     status: str = "approved"
     max_executions: int = 1
 
@@ -273,25 +274,26 @@ class PostgresApprovalStore:
 
     @staticmethod
     def _record(row: tuple[Any, ...]) -> ApprovalRecord:
-        parameters = row[5]
+        parameters = row[6]
         if isinstance(parameters, str):
             parameters = json.loads(parameters)
         return ApprovalRecord(
             approval_id=str(row[0]),
             incident_id=str(row[1]),
-            runbook_ref=f"{row[2]}@{row[3]}",
-            target=str(row[4]),
+            plan_id=str(row[2]),
+            runbook_ref=f"{row[3]}@{row[4]}",
+            target=str(row[5]),
             parameters=dict(parameters or {}),
-            plan_hash=str(row[6]),
-            risk_level=RiskLevel(str(row[7])),
+            plan_hash=str(row[7]),
+            risk_level=RiskLevel(str(row[8])),
             audience="sentinel-action-gateway",
-            expires_at=row[8],
+            expires_at=row[9],
             target_identity=TargetIdentity(
-                namespace=str(row[9]), kind=str(row[10]), name=str(row[11]),
-                uid=str(row[12]), generation=int(row[13]),
+                namespace=str(row[10]), kind=str(row[11]), name=str(row[12]),
+                uid=str(row[13]), generation=int(row[14]),
             ),
-            status=str(row[14]),
-            max_executions=int(row[15]),
+            status=str(row[15]),
+            max_executions=int(row[16]),
         )
 
     def get(self, approval_id: str) -> ApprovalRecord | None:
@@ -300,7 +302,7 @@ class PostgresApprovalStore:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT ar.id, ar.incident_id, rp.runbook_id, rp.runbook_version,
+                    SELECT ar.id, ar.incident_id, ar.plan_id, rp.runbook_id, rp.runbook_version,
                            rp.target_name, rp.parameters, ar.plan_hash, ar.risk_level,
                            ar.expires_at, rp.target_namespace, rp.target_kind,
                            rp.target_name, rp.target_uid, rp.target_observed_generation,

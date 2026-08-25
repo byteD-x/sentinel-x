@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -162,6 +163,8 @@ class HealthResponse(BaseModel):
 class StoredExecution:
     execution_id: str
     approval_id: str = ""
+    incident_id: str = ""
+    plan_id: str = ""
     status: str = "pending"
     runbook_ref: str = ""
     target: str = ""
@@ -173,6 +176,8 @@ class StoredExecution:
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     execution_mode: str = "fixture"
+    target_identity: TargetIdentity | None = None
+    target_resource_version: str = "unknown"
 
 
 class ExecutionStore:
@@ -209,6 +214,119 @@ class ExecutionStore:
             for key, value in kwargs.items():
                 setattr(execution, key, value)
         return execution
+
+
+class PostgresExecutionStore:
+    """full profile 的 ActionExecution 持久化与幂等读取。"""
+
+    def __init__(self, connect):
+        if not callable(connect):
+            raise TypeError("connect 必须是可调用的连接工厂")
+        self._connect = connect
+        self.claim_lock = asyncio.Lock()
+
+    @staticmethod
+    def _hash(value: str) -> str:
+        return hashlib.sha256(value.encode()).hexdigest()
+
+    @staticmethod
+    def _record(row) -> StoredExecution:
+        before = row[13] or {}
+        after = row[15] or {}
+        return StoredExecution(
+            execution_id=str(row[0]), approval_id=str(row[3]), incident_id=str(row[1]),
+            plan_id=str(row[2]), status=str(row[5]).lower(), runbook_ref=str(row[4]),
+            target=str(row[8]), idempotency_key=str(row[7]),
+            before_state=before.get("text") if isinstance(before, dict) else None,
+            after_state=after.get("text") if isinstance(after, dict) else None,
+            error=row[17], started_at=row[19], completed_at=row[20],
+            execution_mode="fake-k8s" if row[13] and row[13].get("mode") == "fake-k8s" else "fixture",
+            target_identity=TargetIdentity(
+                namespace=str(row[9]), kind=str(row[10]), name=str(row[11]),
+                uid=str(row[12]), generation=int(row[14]),
+            ),
+        )
+
+    _SELECT = """
+        SELECT id, incident_id, plan_id, approval_id, 'restart_deployment@1', status,
+               idempotency_key_hash, idempotency_key_hash, target_name, target_namespace,
+               target_kind, target_name, target_uid, before_state_ref,
+               target_observed_generation, after_state_ref, after_state_hash,
+               error_code, attempt_count, started_at, finished_at
+        FROM action_executions
+    """
+
+    def _load(self, where: str, params: tuple):
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(self._SELECT + " WHERE " + where, params)
+                row = cursor.fetchone()
+                return self._record(row) if row else None
+        finally:
+            connection.close()
+
+    def check_idempotency(self, key: str) -> StoredExecution | None:
+        return self._load("idempotency_key_hash = %s", (self._hash(key),))
+
+    def get(self, execution_id: str) -> StoredExecution | None:
+        return self._load("id = %s", (execution_id,))
+
+    def create(self, execution: StoredExecution) -> None:
+        if not execution.target_identity:
+            raise ValueError("PostgreSQL ActionExecution 缺少 target_identity")
+        identity = execution.target_identity
+        connection = self._connect()
+        try:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO action_executions(
+                            id, incident_id, plan_id, approval_id, idempotency_key_hash,
+                            status, target_namespace, target_kind, target_name, target_uid,
+                            target_observed_generation, before_state_ref, started_at
+                            , target_resource_version
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                        """,
+                        (
+                            execution.execution_id, execution.incident_id, execution.plan_id,
+                            execution.approval_id, self._hash(execution.idempotency_key),
+                            execution.status.upper(), identity.namespace, identity.kind,
+                            identity.name, identity.uid, identity.generation,
+                            json.dumps({"text": execution.before_state, "mode": execution.execution_mode}),
+                            execution.started_at, execution.target_resource_version,
+                        ),
+                    )
+        finally:
+            connection.close()
+
+    def update(self, execution_id: str, **kwargs) -> StoredExecution | None:
+        execution = self.get(execution_id)
+        if execution is None:
+            return None
+        status = kwargs.get("status", execution.status).upper()
+        connection = self._connect()
+        try:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE action_executions
+                        SET status = %s, after_state_ref = %s::jsonb,
+                            error_code = %s, finished_at = %s, version = version + 1
+                        WHERE id = %s
+                        """,
+                        (
+                            status,
+                            json.dumps({"text": kwargs.get("after_state", execution.after_state)}),
+                            kwargs.get("error", execution.error),
+                            kwargs.get("completed_at", execution.completed_at), execution_id,
+                        ),
+                    )
+        finally:
+            connection.close()
+        return self.get(execution_id)
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +560,8 @@ class ActionGate:
             execution = StoredExecution(
                 execution_id=execution_id,
                 approval_id=req.approval_id,
+                incident_id=req.incident_id,
+                plan_id=approval.plan_id,
                 status="failed",
                 runbook_ref=req.runbook_ref,
                 target=req.target,
@@ -450,6 +570,7 @@ class ActionGate:
                 started_at=started_at,
                 completed_at=datetime.now(),
                 execution_mode=self.executor.execution_mode,
+                target_identity=req.target_identity,
             )
             self.store.create(execution)
             return execution
@@ -457,6 +578,8 @@ class ActionGate:
         execution = StoredExecution(
             execution_id=execution_id,
             approval_id=req.approval_id,
+            incident_id=req.incident_id,
+            plan_id=approval.plan_id,
             status="running",
             runbook_ref=req.runbook_ref,
             target=req.target,
@@ -464,6 +587,7 @@ class ActionGate:
             before_state=before_state,
             started_at=started_at,
             execution_mode=self.executor.execution_mode,
+            target_identity=req.target_identity,
         )
         self.store.create(execution)
 
@@ -493,7 +617,20 @@ class ActionGate:
 # ---------------------------------------------------------------------------
 
 
-store = ExecutionStore()
+def _build_runtime_execution_store():
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        return ExecutionStore()
+    database_url = os.getenv("DATABASE_URL", "")
+    if not database_url.startswith(("postgresql://", "postgresql+")):
+        raise RuntimeError("SENTINEL_PROFILE=full Action Gateway 缺少 PostgreSQL DATABASE_URL")
+    try:
+        psycopg = __import__("psycopg")
+    except ImportError as exc:
+        raise RuntimeError("SENTINEL_PROFILE=full Action Gateway 需要 psycopg") from exc
+    return PostgresExecutionStore(lambda: psycopg.connect(database_url))
+
+
+store = _build_runtime_execution_store()
 
 
 def _build_runtime_approval_store():
