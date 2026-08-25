@@ -27,8 +27,7 @@ CREATE TABLE IF NOT EXISTS remediation_plans (
     status TEXT NOT NULL DEFAULT 'PROPOSED'
         CHECK (status IN ('PROPOSED', 'APPROVED', 'SUPERSEDED', 'REJECTED', 'EXECUTED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    superseded_at TIMESTAMPTZ,
-    CONSTRAINT remediation_plans_runbook_key UNIQUE (runbook_id, runbook_version, runbook_hash)
+    superseded_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS incidents (
@@ -118,8 +117,7 @@ CREATE TABLE IF NOT EXISTS approval_requests (
     revoked_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
-    CONSTRAINT approval_requests_expiry_check CHECK (expires_at > created_at),
-    CONSTRAINT approval_requests_plan_hash_fk CHECK (plan_hash <> '')
+    CONSTRAINT approval_requests_expiry_check CHECK (expires_at > created_at)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS approval_requests_pending_plan_hash_uidx
@@ -184,9 +182,11 @@ CREATE TABLE IF NOT EXISTS verification_results (
     )),
     trigger_ref TEXT CHECK (trigger_ref IS NULL OR length(trigger_ref) <= 256),
     recovery_actor TEXT NOT NULL CHECK (recovery_actor IN (
-        'AI_REMEDIATION', 'SCENARIO_RUNNER', 'HUMAN', 'UNKNOWN'
+        'ACTION_GATEWAY', 'SCENARIO_RUNNER', 'HUMAN', 'UNKNOWN'
     )),
     slo_policy_version TEXT NOT NULL CHECK (length(slo_policy_version) BETWEEN 1 AND 128),
+    metric TEXT NOT NULL CHECK (length(metric) BETWEEN 1 AND 256),
+    threshold JSONB NOT NULL,
     baseline_window JSONB NOT NULL,
     observed_window JSONB NOT NULL,
     sli_results JSONB NOT NULL,
@@ -197,9 +197,6 @@ CREATE TABLE IF NOT EXISTS verification_results (
 
 CREATE INDEX IF NOT EXISTS verification_results_incident_created_idx
     ON verification_results (incident_id, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS verification_results_passed_incident_uidx
-    ON verification_results (incident_id)
-    WHERE passed;
 
 CREATE TABLE IF NOT EXISTS outbox_events (
     id UUID PRIMARY KEY,

@@ -124,9 +124,10 @@ def test_action_and_verification_contract() -> None:
     verification = _table_block(sql, "verification_results")
     assert "baseline_window JSONB NOT NULL" in verification
     assert "observed_window JSONB NOT NULL" in verification
+    assert "metric TEXT NOT NULL" in verification
+    assert "threshold JSONB NOT NULL" in verification
     assert "sli_results JSONB NOT NULL" in verification
     assert "passed BOOLEAN NOT NULL" in verification
-    assert "verification_results_passed_incident_uidx" in sql
 
 
 def test_outbox_contract_supports_at_least_once_dispatch() -> None:
