@@ -21,12 +21,13 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import random
 import re
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -64,6 +65,7 @@ from sentinel_x_control_api.eval_archive import (
 from sentinel_x_control_api.local_state import LocalStateSnapshot
 from sentinel_x_control_api.local_workflow import LocalExerciseWorkflow
 from sentinel_x_control_api.postgres import apply_migrations, check_postgres_health
+from sentinel_x_control_api.postgres_dispatcher import PostgresOutboxDispatcher
 from sentinel_x_control_api.postgres_repository import PostgresIncidentRepository
 
 
@@ -71,6 +73,7 @@ EVAL_ARCHIVE_DIR = Path(os.getenv("SENTINEL_EVAL_ARCHIVE_DIR", "evals/results"))
 EVAL_ARCHIVE_MAX_BYTES = int(os.getenv("SENTINEL_EVAL_ARCHIVE_MAX_BYTES", "2097152"))
 INCIDENT_EXPORT_MAX_BYTES = int(os.getenv("SENTINEL_INCIDENT_EXPORT_MAX_BYTES", "1048576"))
 SCENARIOS_DIR = Path(__file__).resolve().parents[4] / "demo" / "scenarios"
+LOGGER = logging.getLogger(__name__)
 
 
 def _evaluation_archive_error_response(error: EvaluationArchiveError) -> JSONResponse:
@@ -823,7 +826,12 @@ class PostgresStore(InMemoryStore):
     def __init__(self, repository: PostgresIncidentRepository):
         super().__init__(state_path=None)
         self.repository = repository
+        self._published_events = []
         self.rebuild_projection()
+
+    def publish_outbox_event(self, event) -> None:
+        """接收已发布事件，供当前进程的 SSE/通知消费者读取。"""
+        self._published_events.append(event)
 
     @staticmethod
     def _timestamp(value: datetime) -> datetime:
@@ -993,6 +1001,7 @@ API_VERSION = "v1"
 async def lifespan(app: FastAPI):
     """应用生命周期。"""
     global store
+    dispatcher_task = None
     if os.getenv("SENTINEL_PROFILE", "light") == "full":
         database_url = os.getenv("DATABASE_URL", "")
         if not database_url:
@@ -1007,10 +1016,30 @@ async def lifespan(app: FastAPI):
             )
             store = PostgresStore(repository)
             local_workflow.store = store
+            dispatcher = PostgresOutboxDispatcher(
+                lambda: psycopg.connect(database_url), store.publish_outbox_event
+            )
+
+            async def dispatch_outbox() -> None:
+                interval = max(0.1, float(os.getenv("SENTINEL_OUTBOX_INTERVAL_SECONDS", "1")))
+                while True:
+                    try:
+                        await asyncio.to_thread(dispatcher.dispatch_once)
+                    except Exception:  # noqa: BLE001 - 后台失败由下一轮重试
+                        LOGGER.exception("PostgreSQL outbox dispatcher 运行失败")
+                    await asyncio.sleep(interval)
+
+            dispatcher_task = asyncio.create_task(dispatch_outbox())
         except Exception as exc:  # noqa: BLE001 - full 启动必须 fail closed
             raise RuntimeError("SENTINEL_PROFILE=full PostgreSQL 初始化失败") from exc
     local_workflow.resume_all()
-    yield
+    try:
+        yield
+    finally:
+        if dispatcher_task is not None:
+            dispatcher_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await dispatcher_task
 
 
 app = FastAPI(

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -130,6 +131,17 @@ def test_control_api_full_lifespan_uses_postgres_store(monkeypatch):
                     "SELECT count(*) FROM incidents WHERE id = %s", (incident.id,)
                 ).fetchone()[0]
             assert count == 1
+            deadline = time.monotonic() + 3
+            published = 0
+            while time.monotonic() < deadline and published == 0:
+                with psycopg.connect(database_url) as connection:
+                    published = connection.execute(
+                        "SELECT count(*) FROM outbox_events WHERE aggregate_id = %s AND published_at IS NOT NULL",
+                        (incident.id,),
+                    ).fetchone()[0]
+                if published == 0:
+                    time.sleep(0.1)
+            assert published == 1
     finally:
         control_app.store = original_store
         control_app.local_workflow.store = original_workflow_store
