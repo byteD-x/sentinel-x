@@ -49,7 +49,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - `[部分完成]` Action Gateway SQLite 审批存储已支持重启恢复和跨连接原子消费；PostgreSQL migration、projection/outbox、Control API 到 Gateway 的 DB 绑定审批和跨服务事务仍未完成。
 - `[未完成]` Prometheus/Loki/Tempo/OTel full profile 查询未完成；诊断与动作仍存在模拟路径。
 - `[部分完成]` Action Gateway 默认仍为 fixture 执行；受控 fake Kubernetes 仅在隔离测试中验证状态变化和失败注入，不写真实 Kubernetes，恢复验证也仍未连接真实观测源。
-- `[未完成]` 正式 `/api/v1`、会话认证、CSRF、ETag、正式幂等契约尚未收敛。
+- `[部分完成]` 正式 `/api/v1` approval-requests 列表/详情/decision、local session、CSRF、ETag/If-Match 和 body 绑定幂等契约已收敛；仍缺 OIDC/服务身份与跨进程幂等记录。
 - `[未完成]` 六场景固定 benchmark、holdout 数据集、第二个干净环境 cold run 和可发布证据包未完成。
 - `[部分完成]` 仓库已有 `.github/workflows/quality.yml`，本地门禁通过；尚未有远端 CI run 证据，产品事件埋点/漏斗数据实现仍未完成。
 

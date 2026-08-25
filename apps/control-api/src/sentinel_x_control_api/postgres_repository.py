@@ -360,9 +360,11 @@ class PostgresIncidentRepository:
                 SELECT ar.id, ar.incident_id, ar.plan_id, ar.plan_hash,
                        ar.risk_level, ar.policy_version, ar.status, ar.expires_at,
                        ar.version, rp.runbook_id, rp.runbook_version,
-                       rp.target_name, rp.parameters
+                       rp.target_name, rp.parameters, rp.canonical_payload,
+                       ar.created_at, ad.decided_at, ad.approver_id, ad.reason
                 FROM approval_requests ar
                 JOIN remediation_plans rp ON rp.id = ar.plan_id
+                LEFT JOIN approval_decisions ad ON ad.request_id = ar.id
             """
             params: tuple[Any, ...] = ()
             if incident_id is not None:
@@ -377,7 +379,17 @@ class PostgresIncidentRepository:
                     runbook_ref=f"{row[9]}@{row[10]}",
                     target=str(row[11]),
                     parameters=dict(row[12] or {}),
+                    created_at=row[14].isoformat() if row[14] else None,
+                    decided_at=row[15].isoformat() if row[15] else None,
+                    decided_by=row[16],
+                    decision_reason=row[17],
                 )
+                canonical = row[13]
+                if isinstance(canonical, str):
+                    canonical = json.loads(canonical)
+                if isinstance(canonical, dict) and canonical.get("client_plan_id"):
+                    result["plan_id"] = str(canonical["client_plan_id"])
+                    result["db_plan_id"] = str(row[2])
                 approvals.append(result)
             return approvals
 

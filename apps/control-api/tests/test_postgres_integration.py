@@ -403,7 +403,10 @@ def test_control_api_full_approval_is_persisted(monkeypatch):
             restored_approvals = restarted.list_approvals(incident.id)
             assert len(restored_approvals) == 1
             assert restored_approvals[0]["id"] == approval_id
+            assert restored_approvals[0]["plan_id"] == "plan-api-approval"
             assert restored_approvals[0]["runbook_ref"] == "restart_deployment@1"
+            assert restored_approvals[0]["decided_by"] == "approver"
+            assert restored_approvals[0]["decision_reason"] == "integration decision"
     finally:
         control_app.store = original_store
         control_app.local_workflow.store = original_workflow_store

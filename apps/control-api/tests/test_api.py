@@ -300,6 +300,48 @@ class TestVersionedApi:
         )
         assert conflict.status_code == 409
 
+    async def test_formal_approval_request_resource_contract(self, client, monkeypatch):
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+        started = await client.post(
+            "/api/scenarios/inventory-latched-5xx@1/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+        incident_id = started.json()["incident_id"]
+        approval = (await client.get(f"/api/incidents/{incident_id}/approvals")).json()["items"][0]
+        viewer = control_module.build_local_session_token("viewer", int(time.time()) + 300)
+        listed = await client.get(
+            "/api/v1/approval-requests?status=pending",
+            headers={"Authorization": viewer},
+        )
+        assert listed.status_code == 200
+        detail = await client.get(
+            f"/api/v1/approval-requests/{approval['id']}",
+            headers={"Authorization": viewer},
+        )
+        assert detail.status_code == 200
+        assert detail.headers["etag"].startswith(f'"approval-{approval["id"]}-v')
+        approver = control_module.build_local_session_token("approver", int(time.time()) + 300)
+        csrf = hmac.new(
+            b"test-session-secret", f"csrf:{approver}".encode(), hashlib.sha256
+        ).hexdigest()
+        decision = await client.post(
+            f"/api/v1/approval-requests/{approval['id']}/decisions",
+            headers={
+                "Authorization": approver,
+                "X-CSRF-Token": csrf,
+                "Idempotency-Key": "formal-approval-decision-001",
+                "If-Match": detail.headers["etag"],
+            },
+            json={
+                "decision": "APPROVED",
+                "reason": "formal contract",
+                "expected_plan_hash": approval["plan_hash"],
+            },
+        )
+        assert decision.status_code == 200, decision.text
+        assert decision.json()["status"] == "approved"
+
 
 @pytest.mark.asyncio
 class TestEvaluations:

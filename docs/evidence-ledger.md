@@ -46,6 +46,7 @@
 - VerificationResult PostgreSQL 持久化切片：`recovery.verified` Timeline 事件在同一领域事务中追加 `verification_results`，保存 `passed`、`recovery_actor`、SLO policy、threshold、baseline/observed window 和 failure reason；本机 PostgreSQL 重启集成验证通过。当前数据由受控 workflow payload 触发，尚未连接 Prometheus/Loki/Tempo 真实观测查询。
 - full API CSRF 切片：`/api/v1` 状态变更在 `SENTINEL_PROFILE=full` 下要求 `X-CSRF-Token = HMAC(session_signing_key, "csrf:" + Authorization)`；测试覆盖缺失 token 403 与有效 token 202。该机制保护 local-session 原型，不等同于 OIDC/浏览器正式会话或服务身份认证。
 - full API idempotency 切片：`/api/v1` POST/PUT/PATCH/DELETE 在 full profile 要求 16–128 字符 `Idempotency-Key`，按 Authorization+路由+body hash 缓存成功响应；同 key 同 body 重放原响应，body 冲突返回 409。该缓存是进程内门禁，跨重启/多副本仍需 PostgreSQL `idempotency_records` 接线。
+- 正式 Approval Resource 切片：full `/api/v1/approval-requests` 列表、详情和 decision 路由已接入签名 session、CSRF、Idempotency-Key、If-Match、plan hash 与一次性 PostgreSQL decision；重启读取保留客户端 plan_id、创建/决定时间和决定人。仍未完成 OIDC/服务身份与跨进程幂等记录。
 - 限制：full Kubernetes/observability E2E、TokenReview/服务身份和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈与 Kubernetes 权限清单静态检查及本地 fixture 证据包。
 
 ## 2. Claim 台账

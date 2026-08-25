@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID, uuid4
 
 from demo.scenarios.loader import ScenarioLoadError, ScenarioLoader
@@ -285,6 +285,12 @@ class ApprovalRequest(StrictBaseModel):
 class ApprovalDecision(StrictBaseModel):
     approved: bool
     reason: str
+
+
+class ApprovalDecisionCommand(StrictBaseModel):
+    decision: Literal["APPROVED", "REJECTED"]
+    reason: str = Field(default="", max_length=4096)
+    expected_plan_hash: str = Field(..., min_length=16, max_length=256)
 
 
 class HypothesisResponse(BaseModel):
@@ -829,10 +835,6 @@ class PostgresStore(InMemoryStore):
         self._published_events = []
         self.rebuild_projection()
         for approval in self.repository.list_approvals():
-            approval.setdefault("created_at", datetime.now().isoformat())
-            approval.setdefault("decided_at", None)
-            approval.setdefault("decided_by", None)
-            approval.setdefault("decision_reason", None)
             self._approvals[approval["id"]] = approval
 
     def publish_outbox_event(self, event) -> None:
@@ -1843,7 +1845,7 @@ async def list_all_approvals(
         raise HTTPException(status_code=400, detail="不支持的审批状态筛选")
 
     items = []
-    for approval in store._approvals.values():
+    for approval in store.list_approvals():
         if status_filter != "all" and approval["status"] != status_filter:
             continue
         incident = store.get_incident(approval["incident_id"])
@@ -1867,6 +1869,62 @@ async def list_all_approvals(
         item["created_at"],
     ))
     return {"items": items, "total": len(items)}
+
+
+async def list_formal_approval_requests(
+    status_filter: Optional[str] = Query(default="pending", alias="status"),
+):
+    return await list_all_approvals(status_filter)
+
+
+async def get_formal_approval_request(
+    approval_id: str,
+    response: Response,
+):
+    approval = next(
+        (item for item in store.list_approvals() if item["id"] == approval_id),
+        None,
+    )
+    if approval is None:
+        raise HTTPException(status_code=404, detail=f"审批 {approval_id} 不存在")
+    version = int(approval.get("version", 1))
+    response.headers["ETag"] = f'"approval-{approval_id}-v{version}"'
+    return approval
+
+
+async def decide_formal_approval_request(
+    approval_id: str,
+    command: ApprovalDecisionCommand,
+    request: Request,
+    if_match: Optional[str] = Header(default=None, alias="If-Match"),
+    role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
+):
+    decided_by = _require_role(
+        getattr(request.state, "session_role", None) or role, "approver"
+    )
+    approval = next(
+        (item for item in store.list_approvals() if item["id"] == approval_id),
+        None,
+    )
+    if approval is None:
+        raise HTTPException(status_code=404, detail=f"审批 {approval_id} 不存在")
+    expected_etag = f'"approval-{approval_id}-v{int(approval.get("version", 1))}"'
+    if if_match is None:
+        raise HTTPException(status_code=428, detail="审批决定必须提供 If-Match")
+    if if_match != expected_etag:
+        raise HTTPException(status_code=412, detail="审批版本已变化，请重新读取并重试")
+    if command.expected_plan_hash != approval["plan_hash"]:
+        raise HTTPException(status_code=412, detail="审批 plan hash 已变化")
+    result = store.decide_approval(
+        approval_id,
+        ApprovalDecision(approved=command.decision == "APPROVED", reason=command.reason),
+        decided_by=decided_by,
+        incident_id=approval["incident_id"],
+    )
+    if result is None:
+        raise HTTPException(status_code=409, detail="审批已被其他请求决定或已过期")
+    local_workflow.resume(approval["incident_id"])
+    return result
 
 
 # ---- 场景 ----
@@ -2178,6 +2236,9 @@ app.add_api_route("/api/v1/incidents/{incident_id}/approvals", request_approval,
 app.add_api_route("/api/v1/incidents/{incident_id}/approvals/{approval_id}", decide_approval, methods=["PUT"], dependencies=_v1_auth)
 app.add_api_route("/api/v1/incidents/{incident_id}/approvals", list_approvals, methods=["GET"], dependencies=_v1_auth)
 app.add_api_route("/api/v1/approvals", list_all_approvals, methods=["GET"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/approval-requests", list_formal_approval_requests, methods=["GET"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/approval-requests/{approval_id}", get_formal_approval_request, methods=["GET"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/approval-requests/{approval_id}/decisions", decide_formal_approval_request, methods=["POST"], dependencies=_v1_auth)
 app.add_api_route("/api/v1/scenarios", list_scenarios, methods=["GET"], response_model=ScenarioListResponse, dependencies=_v1_auth)
 app.add_api_route("/api/v1/scenarios/{scenario_id}/run", run_scenario, methods=["POST"], response_model=ScenarioRunResponse, status_code=202, dependencies=_v1_auth)
 
