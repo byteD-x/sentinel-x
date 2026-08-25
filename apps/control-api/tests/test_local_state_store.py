@@ -60,6 +60,33 @@ def test_store_restores_incident_timeline_and_approval_after_recreation(tmp_path
     assert restored.list_approvals(incident.id) == [approval]
 
 
+def test_store_restores_outbox_and_marks_event_published(tmp_path):
+    state_path = tmp_path / "outbox.sqlite3"
+    store = InMemoryStore(state_path=state_path)
+    incident = store.create_incident(
+        IncidentCreate(
+            alert_source=AlertSource(
+                alertmanager_id="outbox-test",
+                fingerprint="outbox-test-fingerprint",
+                alert_name="Outbox test",
+                severity=IncidentSeverity.INFO,
+                description="outbox persistence",
+                started_at=datetime(2026, 8, 9, 12, 0, 0),
+            )
+        )
+    )
+
+    pending = store.list_outbox(unpublished_only=True)
+    assert len(pending) == 1
+    event_id = pending[0]["id"]
+
+    restored = InMemoryStore(state_path=state_path)
+    assert restored.list_outbox(unpublished_only=True)[0]["id"] == event_id
+    assert restored.mark_outbox_published(event_id) is True
+    assert restored.list_outbox(unpublished_only=True) == []
+    assert restored.mark_outbox_published(event_id) is True
+
+
 def test_store_restores_resumable_workflow_checkpoint_after_recreation(tmp_path):
     """等待审批的工作流在进程重建后必须保留唯一处理位置。"""
     state_path = tmp_path / "workflow.sqlite3"

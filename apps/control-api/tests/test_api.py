@@ -87,6 +87,8 @@ def reset_store(monkeypatch):
     control_module.store._workflow_checkpoints.clear()
     control_module.store.flush()
     control_module._ALERT_INGRESS_REPLAY_CACHE.clear()
+    control_module.store._outbox.clear()
+    control_module.store.flush()
     monkeypatch.setattr(control_module, "ALERT_INGRESS_HMAC_KEY", "test-alert-ingress-secret")
 
 
@@ -125,6 +127,43 @@ class TestHealthCheck:
         assert data["status"] == "ok"
         assert data["version"] == "0.1.0"
         assert data["actions_enabled"] is False
+
+
+@pytest.mark.asyncio
+class TestVersionedApi:
+    async def test_v1_fails_closed_without_session_key(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", None)
+        response = await client.get("/api/v1/incidents")
+        assert response.status_code == 503
+        assert "会话认证" in response.json()["detail"]
+
+    async def test_v1_detail_returns_etag_and_requires_if_match_for_decision(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+        started = await client.post(
+            "/api/scenarios/inventory-latched-5xx@1/run",
+            headers={"X-Sentinel-Role": "scenario_operator"},
+        )
+        incident_id = started.json()["incident_id"]
+        approval_id = (await client.get(f"/api/incidents/{incident_id}/approvals")).json()["items"][0]["id"]
+        viewer = control_module.build_local_session_token("viewer", int(time.time()) + 300)
+        detail = await client.get(f"/api/v1/incidents/{incident_id}", headers={"Authorization": viewer})
+        assert detail.status_code == 200
+        etag = detail.headers["etag"]
+        assert etag.startswith(f'"incident-{incident_id}-v') and etag.endswith('"')
+
+        approver = control_module.build_local_session_token("approver", int(time.time()) + 300)
+        missing = await client.put(
+            f"/api/v1/incidents/{incident_id}/approvals/{approval_id}",
+            headers={"Authorization": approver},
+            json={"approved": True, "reason": "并发测试"},
+        )
+        assert missing.status_code == 428
+        stale = await client.put(
+            f"/api/v1/incidents/{incident_id}/approvals/{approval_id}",
+            headers={"Authorization": approver, "If-Match": '"incident-%s-v999"' % incident_id},
+            json={"approved": True, "reason": "并发测试"},
+        )
+        assert stale.status_code == 412
 
 
 @pytest.mark.asyncio

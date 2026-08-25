@@ -53,6 +53,7 @@ from sentinel_x_contracts.approval import (
 from sentinel_x_contracts.timeline import (
     TimelineEventType,
     TimelineEvent,
+    OutboxEvent,
 )
 from sentinel_x_contracts.scenario import (
     FaultCategory,
@@ -107,6 +108,7 @@ __all__ = [
     # Timeline
     "TimelineEventType",
     "TimelineEvent",
+    "OutboxEvent",
     # Scenario
     "FaultCategory",
     "RootCauseCategory",

@@ -32,7 +32,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from demo.scenarios.loader import ScenarioLoadError, ScenarioLoader
-from fastapi import FastAPI, Header, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -247,6 +247,7 @@ class InMemoryStore:
         self._fingerprint_index: dict[str, str] = {}
         self._approvals: dict[str, dict] = {}
         self._workflow_checkpoints: dict[str, dict] = {}
+        self._outbox: list[dict] = []
         self._state_snapshot = LocalStateSnapshot(state_path) if state_path else None
         if self._state_snapshot:
             self._restore()
@@ -257,6 +258,7 @@ class InMemoryStore:
         self._fingerprint_index.clear()
         self._approvals.clear()
         self._workflow_checkpoints.clear()
+        self._outbox.clear()
         if self._state_snapshot:
             self._state_snapshot.clear()
 
@@ -267,7 +269,7 @@ class InMemoryStore:
 
     def _snapshot_payload(self) -> dict:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "incidents": [
                 {
                     "id": incident.id,
@@ -291,6 +293,7 @@ class InMemoryStore:
             ],
             "approvals": list(self._approvals.values()),
             "workflow_checkpoints": list(self._workflow_checkpoints.values()),
+            "outbox": list(self._outbox),
         }
 
     def _restore(self) -> None:
@@ -298,12 +301,13 @@ class InMemoryStore:
         payload = self._state_snapshot.load()
         if payload is None:
             return
-        if payload.get("schema_version") != 1:
+        if payload.get("schema_version") not in {1, 2}:
             raise ValueError("本地状态快照版本不受支持")
         incidents = payload.get("incidents")
         approvals = payload.get("approvals")
         checkpoints = payload.get("workflow_checkpoints", [])
-        if not all(isinstance(value, list) for value in (incidents, approvals, checkpoints)):
+        outbox = payload.get("outbox", [])
+        if not all(isinstance(value, list) for value in (incidents, approvals, checkpoints, outbox)):
             raise ValueError("本地状态快照结构无效")
         for raw in incidents:
             if not isinstance(raw, dict):
@@ -339,6 +343,10 @@ class InMemoryStore:
             if not isinstance(approval, dict) or not isinstance(approval.get("id"), str):
                 raise ValueError("本地状态快照包含无效审批")
             self._approvals[approval["id"]] = approval
+        for event in outbox:
+            if not isinstance(event, dict) or not isinstance(event.get("id"), str):
+                raise ValueError("本地状态快照包含无效 outbox 事件")
+            self._outbox.append(dict(event))
         orphan_checkpoint_found = False
         for checkpoint in checkpoints:
             incident_id = checkpoint.get("incident_id") if isinstance(checkpoint, dict) else None
@@ -425,6 +433,17 @@ class InMemoryStore:
             timestamp=datetime.now(),
         )
         incident.timeline.append(event)
+        self._outbox.append({
+            "id": str(uuid4()),
+            "aggregate_type": "incident",
+            "aggregate_id": incident.id,
+            "sequence": event.sequence,
+            "event_type": event.event_type,
+            "actor": event.actor,
+            "payload": event.payload,
+            "occurred_at": event.timestamp.isoformat(),
+            "published_at": None,
+        })
         return event
 
     def add_timeline_event(
@@ -491,6 +510,22 @@ class InMemoryStore:
         if not incident:
             return []
         return [e for e in incident.timeline if e.sequence > after_sequence]
+
+    def list_outbox(self, *, unpublished_only: bool = False) -> list[dict]:
+        """按事故序号返回可重试的投影事件。"""
+        events = self._outbox
+        if unpublished_only:
+            events = [event for event in events if event.get("published_at") is None]
+        return [dict(event) for event in events]
+
+    def mark_outbox_published(self, event_id: str) -> bool:
+        for event in self._outbox:
+            if event.get("id") == event_id:
+                if event.get("published_at") is None:
+                    event["published_at"] = datetime.now().isoformat()
+                    self.flush()
+                return True
+        return False
 
     def list_approvals(self, incident_id: Optional[str] = None) -> list[dict]:
         """按创建顺序返回审批，不向调用方暴露内部可变映射。"""
@@ -681,6 +716,8 @@ ALERT_INGRESS_REPLAY_TTL_SECONDS = int(os.getenv("ALERT_INGRESS_REPLAY_TTL_SECON
 ALERT_INGRESS_REPLAY_MAX_ENTRIES = int(os.getenv("ALERT_INGRESS_REPLAY_MAX_ENTRIES", "10000"))
 _ALERT_INGRESS_REPLAY_CACHE: dict[str, float] = {}
 _ALERT_INGRESS_REPLAY_LOCK = threading.Lock()
+LOCAL_SESSION_SIGNING_KEY = os.getenv("SENTINEL_LOCAL_SESSION_SIGNING_KEY")
+API_VERSION = "v1"
 
 
 # ---------------------------------------------------------------------------
@@ -767,6 +804,46 @@ async def _verify_alert_ingress(request: Request) -> None:
         if len(_ALERT_INGRESS_REPLAY_CACHE) > ALERT_INGRESS_REPLAY_MAX_ENTRIES:
             oldest_nonce = min(_ALERT_INGRESS_REPLAY_CACHE, key=_ALERT_INGRESS_REPLAY_CACHE.get)
             _ALERT_INGRESS_REPLAY_CACHE.pop(oldest_nonce, None)
+
+
+def build_local_session_token(role: str, expires_at: int) -> str:
+    """为隔离环境生成短期会话令牌；生产身份认证不在此实现。"""
+    if not LOCAL_SESSION_SIGNING_KEY:
+        raise RuntimeError("未配置本地会话签名密钥")
+    payload = f"{role}:{int(expires_at)}"
+    signature = hmac.new(
+        LOCAL_SESSION_SIGNING_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return f"Bearer {payload}:{signature}"
+
+
+async def _require_v1_session(request: Request) -> None:
+    """v1 只接受短期签名会话，密钥缺失时明确 fail-closed。"""
+    if not LOCAL_SESSION_SIGNING_KEY:
+        raise HTTPException(status_code=503, detail="v1 会话认证未配置")
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="v1 会话令牌缺失或格式非法")
+    parts = authorization.removeprefix("Bearer ").split(":")
+    if len(parts) != 3:
+        raise HTTPException(status_code=401, detail="v1 会话令牌缺失或格式非法")
+    role, expires_raw, supplied = parts
+    if role not in {"viewer", "planner", "approver", "scenario_operator", "system"}:
+        raise HTTPException(status_code=403, detail="v1 会话角色非法")
+    try:
+        expires_at = int(expires_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="v1 会话令牌过期时间非法") from exc
+    if expires_at <= int(time.time()):
+        raise HTTPException(status_code=401, detail="v1 会话令牌已过期")
+    expected = hmac.new(
+        LOCAL_SESSION_SIGNING_KEY.encode("utf-8"),
+        f"{role}:{expires_at}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="v1 会话令牌签名无效")
+    request.state.session_role = role
 
 
 _PHASE_ORDER = [
@@ -1062,6 +1139,8 @@ async def list_incidents(
 @app.get("/api/incidents/{incident_id}", response_model=IncidentOverviewResponse)
 async def get_incident(
     incident_id: str,
+    request: Request,
+    response: Response,
     role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
 ):
     """事故详情。"""
@@ -1069,7 +1148,8 @@ async def get_incident(
     if not incident:
         raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
     approval = _active_approval(incident_id)
-    normalized_role = role or "viewer"
+    normalized_role = getattr(request.state, "session_role", None) or role or "viewer"
+    response.headers["ETag"] = f'"incident-{incident.id}-v{incident.version}"'
     return IncidentOverviewResponse(
         id=incident.id,
         fingerprint=incident.fingerprint,
@@ -1157,10 +1237,11 @@ async def get_timeline(
 async def request_approval(
     incident_id: str,
     data: ApprovalRequest,
+    request: Request,
     role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
 ):
     """创建审批请求。"""
-    _require_role(role, "planner", "scenario_operator", "system")
+    _require_role(getattr(request.state, "session_role", None) or role, "planner", "scenario_operator", "system")
     incident = store.get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
@@ -1180,13 +1261,21 @@ async def decide_approval(
     incident_id: str,
     approval_id: str,
     decision: ApprovalDecision,
+    request: Request,
+    if_match: Optional[str] = Header(default=None, alias="If-Match"),
     role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
 ):
     """审批决定。"""
-    decided_by = _require_role(role, "approver")
+    decided_by = _require_role(getattr(request.state, "session_role", None) or role, "approver")
     incident = store.get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail=f"事故 {incident_id} 不存在")
+    if request.url.path.startswith("/api/v1/"):
+        expected_etag = f'"incident-{incident.id}-v{incident.version}"'
+        if if_match is None:
+            raise HTTPException(status_code=428, detail="v1 审批决定必须提供 If-Match")
+        if if_match != expected_etag:
+            raise HTTPException(status_code=412, detail="事故版本已变化，请重新读取并重试")
     result = store.decide_approval(approval_id, decision, decided_by=decided_by, incident_id=incident_id)
     if not result:
         raise HTTPException(status_code=404, detail=f"审批 {approval_id} 不存在或已决定")
@@ -1259,10 +1348,11 @@ async def list_scenarios():
 )
 async def run_scenario(
     scenario_id: str,
+    request: Request,
     role: Optional[str] = Header(default=None, alias="X-Sentinel-Role"),
 ):
     """启动演练场景。"""
-    _require_role(role, "scenario_operator")
+    _require_role(getattr(request.state, "session_role", None) or role, "scenario_operator")
     scenario = _load_scenario_definitions().get(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"场景 {scenario_id} 不存在")
@@ -1537,6 +1627,20 @@ async def seed_demo_data():
         created.append(incident.id)
 
     return {"message": f"已创建 {len(created)} 个演示事故", "incident_ids": created}
+
+
+# 正式版本化入口：复用同一套业务处理器，认证与并发条件由 v1 门禁补齐。
+_v1_auth = [Depends(_require_v1_session)]
+app.add_api_route("/api/v1/incidents", create_incident, methods=["POST"], status_code=201, dependencies=_v1_auth)
+app.add_api_route("/api/v1/incidents", list_incidents, methods=["GET"], response_model=IncidentListResponse, dependencies=_v1_auth)
+app.add_api_route("/api/v1/incidents/{incident_id}", get_incident, methods=["GET"], response_model=IncidentOverviewResponse, dependencies=_v1_auth)
+app.add_api_route("/api/v1/incidents/{incident_id}/timeline", get_timeline, methods=["GET"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/incidents/{incident_id}/approvals", request_approval, methods=["POST"], status_code=201, dependencies=_v1_auth)
+app.add_api_route("/api/v1/incidents/{incident_id}/approvals/{approval_id}", decide_approval, methods=["PUT"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/incidents/{incident_id}/approvals", list_approvals, methods=["GET"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/approvals", list_all_approvals, methods=["GET"], dependencies=_v1_auth)
+app.add_api_route("/api/v1/scenarios", list_scenarios, methods=["GET"], response_model=ScenarioListResponse, dependencies=_v1_auth)
+app.add_api_route("/api/v1/scenarios/{scenario_id}/run", run_scenario, methods=["POST"], response_model=ScenarioRunResponse, status_code=202, dependencies=_v1_auth)
 
 
 if __name__ == "__main__":
