@@ -63,6 +63,8 @@ from sentinel_x_control_api.eval_archive import (
 )
 from sentinel_x_control_api.local_state import LocalStateSnapshot
 from sentinel_x_control_api.local_workflow import LocalExerciseWorkflow
+from sentinel_x_control_api.postgres import apply_migrations, check_postgres_health
+from sentinel_x_control_api.postgres_repository import PostgresIncidentRepository
 
 
 EVAL_ARCHIVE_DIR = Path(os.getenv("SENTINEL_EVAL_ARCHIVE_DIR", "evals/results"))
@@ -807,6 +809,91 @@ class InMemoryStore:
         self.flush()
         return approval
 
+
+class PostgresStore(InMemoryStore):
+    """full profile 的 PostgreSQL 写入适配器。
+
+    读模型暂时保留进程内对象以兼容现有 API 响应；Incident、Timeline 和
+    Outbox 的写入由 PostgreSQL repository 作为权威事务完成。启动恢复/持久
+    读模型将在下一切片接入，full profile 不会静默回退到 SQLite。
+    """
+
+    def __init__(self, repository: PostgresIncidentRepository):
+        super().__init__(state_path=None)
+        self.repository = repository
+
+    @staticmethod
+    def _local_incident(record, data: IncidentCreate) -> StoredIncident:
+        return StoredIncident(
+            id=str(record.id),
+            fingerprint=record.fingerprint,
+            severity=data.alert_source.severity,
+            alert_name=data.alert_source.alert_name,
+            description=data.alert_source.description,
+            created_at=record.opened_at.replace(tzinfo=None),
+            updated_at=record.opened_at.replace(tzinfo=None),
+            workflow_id=record.workflow_id,
+            version=max(1, record.projection_version),
+        )
+
+    def create_incident(self, data: IncidentCreate) -> StoredIncident:
+        existing = self.find_by_fingerprint(data.alert_source.fingerprint)
+        record = self.repository.create_incident(
+            fingerprint=data.alert_source.fingerprint,
+            severity=data.alert_source.severity.value,
+            service=data.alert_source.alert_name,
+            workflow_id=f"incident/{uuid4()}",
+        )
+        if existing and existing.id == str(record.id):
+            return existing
+        incident = self._local_incident(record, data)
+        self._incidents[incident.id] = incident
+        self._fingerprint_index[incident.fingerprint] = incident.id
+        event = TimelineEvent(
+            id=str(uuid4()),
+            incident_id=incident.id,
+            sequence=1,
+            event_type="incident.created",
+            actor="alert_ingress",
+            payload={"fingerprint": incident.fingerprint},
+            timestamp=incident.created_at,
+        )
+        incident.timeline.append(event)
+        incident._timeline_seq = 1
+        return incident
+
+    def _add_timeline_event(
+        self,
+        incident: StoredIncident,
+        event_type: str,
+        actor: str,
+        payload: dict | None = None,
+    ) -> TimelineEvent:
+        actor_type = (
+            "APPROVER" if actor.startswith("approver:")
+            else "WORKFLOW" if actor in {"workflow", "local_action_gateway"}
+            else "INVESTIGATOR" if "diagnostic" in actor or "investigator" in actor
+            else "SYSTEM"
+        )
+        result = self.repository.append_event(
+            incident_id=UUID(incident.id),
+            event_type=event_type,
+            actor_type=actor_type,
+            payload=payload or {},
+        )
+        event = TimelineEvent(
+            id=str(result.id),
+            incident_id=incident.id,
+            sequence=result.sequence,
+            event_type=result.event_type,
+            actor=actor,
+            payload=dict(result.payload),
+            timestamp=result.occurred_at.replace(tzinfo=None),
+        )
+        incident._timeline_seq = result.sequence
+        incident.timeline.append(event)
+        return event
+
 # ---------------------------------------------------------------------------
 # 全局存储实例
 # ---------------------------------------------------------------------------
@@ -834,12 +921,23 @@ API_VERSION = "v1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期。"""
+    global store
     if os.getenv("SENTINEL_PROFILE", "light") == "full":
-        # full profile 尚未接入 PostgreSQL repository/projection；禁止以本地
-        # SQLite 继续运行，避免把 light 结果误报成 full 能力。
-        raise RuntimeError(
-            "SENTINEL_PROFILE=full 当前不可用：PostgreSQL repository/projection 尚未接线"
-        )
+        database_url = os.getenv("DATABASE_URL", "")
+        if not database_url:
+            raise RuntimeError("SENTINEL_PROFILE=full 缺少 DATABASE_URL")
+        try:
+            check_postgres_health(database_url)
+            migrations_dir = Path(__file__).resolve().parents[4] / "migrations"
+            apply_migrations(database_url, migrations_dir=migrations_dir)
+            psycopg = __import__("psycopg")
+            repository = PostgresIncidentRepository(
+                lambda: psycopg.connect(database_url)
+            )
+            store = PostgresStore(repository)
+            local_workflow.store = store
+        except Exception as exc:  # noqa: BLE001 - full 启动必须 fail closed
+            raise RuntimeError("SENTINEL_PROFILE=full PostgreSQL 初始化失败") from exc
     local_workflow.resume_all()
     yield
 
