@@ -65,9 +65,16 @@ def main() -> int:
     parser.add_argument("--output", default="evidence/local-mvp")
     parser.add_argument("--scenario-cycles", type=int, default=3)
     parser.add_argument("--evaluation-runs", type=int, default=3)
+    parser.add_argument(
+        "--evaluation-dataset",
+        choices=("dev", "calibration", "holdout"),
+        default="dev",
+    )
     args = parser.parse_args()
     if args.scenario_cycles < 1 or args.evaluation_runs < 1:
         parser.error("运行次数必须大于 0")
+    if args.evaluation_dataset == "holdout" and args.evaluation_runs < 10:
+        parser.error("holdout 至少需要每场景 10 次运行")
 
     output = (ROOT / args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -123,7 +130,7 @@ def main() -> int:
                 python,
                 "scripts/run_evaluation.py",
                 "--dataset",
-                "dev",
+                args.evaluation_dataset,
                 "--runs",
                 str(args.evaluation_runs),
                 "--output",
@@ -140,6 +147,7 @@ def main() -> int:
         "environment": os.environ.get("SENTINEL_ENVIRONMENT", "local"),
         "scenario_cycles": args.scenario_cycles,
         "evaluation_runs": args.evaluation_runs,
+        "evaluation_dataset": args.evaluation_dataset,
         "steps": steps,
         "artifacts": [{"path": str(path.relative_to(ROOT)), "sha256": _sha256(path)} for path in artifacts],
         "passed": all(step["returncode"] == 0 for step in steps),
