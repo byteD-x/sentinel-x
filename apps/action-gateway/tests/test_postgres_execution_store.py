@@ -73,6 +73,8 @@ def test_postgres_execution_store_persists_idempotency_and_status():
         restored = restarted.get(execution.execution_id)
         assert restored is not None
         assert restored.status == "succeeded"
+        assert restored.runbook_ref == "restart_deployment@1"
+        assert restored.idempotency_key == "idempotency-execution-1"
         assert restored.after_state == "after"
     finally:
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')

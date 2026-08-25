@@ -157,8 +157,16 @@ def main() -> int:
     }
     try:
         _createdb(args.admin_url, database)
-        up = [MIGRATIONS / "0001_domain.sql", MIGRATIONS / "0002_idempotency.sql"]
-        down = [MIGRATIONS / "0002_idempotency.down.sql", MIGRATIONS / "0001_domain.down.sql"]
+        up = [
+            MIGRATIONS / "0001_domain.sql",
+            MIGRATIONS / "0002_idempotency.sql",
+            MIGRATIONS / "0003_action_execution_metadata.sql",
+        ]
+        down = [
+            MIGRATIONS / "0003_action_execution_metadata.down.sql",
+            MIGRATIONS / "0002_idempotency.down.sql",
+            MIGRATIONS / "0001_domain.down.sql",
+        ]
         for migration in up:
             _psql(args.admin_url, database, "--file", str(migration))
         for migration in up:

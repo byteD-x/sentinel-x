@@ -236,7 +236,7 @@ class PostgresExecutionStore:
         return StoredExecution(
             execution_id=str(row[0]), approval_id=str(row[3]), incident_id=str(row[1]),
             plan_id=str(row[2]), status=str(row[5]).lower(), runbook_ref=str(row[4]),
-            target=str(row[8]), idempotency_key=str(row[7]),
+            target=str(row[8]), idempotency_key=str(row[7] or row[6]),
             before_state=before.get("text") if isinstance(before, dict) else None,
             after_state=after.get("text") if isinstance(after, dict) else None,
             error=row[17], started_at=row[19], completed_at=row[20],
@@ -248,8 +248,8 @@ class PostgresExecutionStore:
         )
 
     _SELECT = """
-        SELECT id, incident_id, plan_id, approval_id, 'restart_deployment@1', status,
-               idempotency_key_hash, idempotency_key_hash, target_name, target_namespace,
+        SELECT id, incident_id, plan_id, approval_id, runbook_ref, status,
+               idempotency_key_hash, idempotency_key, target_name, target_namespace,
                target_kind, target_name, target_uid, before_state_ref,
                target_observed_generation, after_state_ref, after_state_hash,
                error_code, attempt_count, started_at, finished_at
@@ -283,15 +283,17 @@ class PostgresExecutionStore:
                     cursor.execute(
                         """
                         INSERT INTO action_executions(
-                            id, incident_id, plan_id, approval_id, idempotency_key_hash,
+                            id, incident_id, plan_id, approval_id, runbook_ref,
+                            idempotency_key_hash, idempotency_key,
                             status, target_namespace, target_kind, target_name, target_uid,
                             target_observed_generation, before_state_ref, started_at
                             , target_resource_version
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
                         """,
                         (
                             execution.execution_id, execution.incident_id, execution.plan_id,
-                            execution.approval_id, self._hash(execution.idempotency_key),
+                            execution.approval_id, execution.runbook_ref,
+                            self._hash(execution.idempotency_key), execution.idempotency_key,
                             execution.status.upper(), identity.namespace, identity.kind,
                             identity.name, identity.uid, identity.generation,
                             json.dumps({"text": execution.before_state, "mode": execution.execution_mode}),
