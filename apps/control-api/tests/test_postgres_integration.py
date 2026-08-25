@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +22,7 @@ from sentinel_x_control_api.app import AlertSource, IncidentCreate, InMemoryStor
 from sentinel_x_control_api.postgres import apply_migrations
 from sentinel_x_control_api.postgres_dispatcher import PostgresOutboxDispatcher
 from sentinel_x_control_api.postgres_repository import PostgresIncidentRepository
+from sentinel_x_domain.services import compute_plan_hash
 
 
 @pytest.mark.integration
@@ -211,5 +212,180 @@ def test_postgres_store_rebuilds_incident_and_timeline_after_restart():
         assert events[0].event_type == "hypothesis.generated"
         assert events[0].payload == {"source": "external-connection"}
     finally:
+        admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        admin.close()
+
+
+@pytest.mark.integration
+def test_postgres_approval_is_immutable_and_single_decision():
+    admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
+    if not admin_url:
+        pytest.skip("未设置 SENTINEL_POSTGRES_ADMIN_URL")
+    psycopg = pytest.importorskip("psycopg")
+    database = f"sentinel_x_approval_{uuid4().hex[:10]}"
+    admin = psycopg.connect(admin_url, autocommit=True)
+    try:
+        admin.execute(f'CREATE DATABASE "{database}"')
+        database_url = admin_url.rsplit("/", 1)[0] + f"/{database}"
+        apply_migrations(
+            database_url,
+            migrations_dir=Path(__file__).resolve().parents[3] / "migrations",
+            connect=lambda *args, **kwargs: psycopg.connect(database_url, **kwargs),
+        )
+        repository = PostgresIncidentRepository(lambda: psycopg.connect(database_url))
+        incident = repository.create_incident(
+            fingerprint="approval-fingerprint",
+            severity="warning",
+            service="payment-api",
+            workflow_id="incident/approval-1",
+        )
+        expires_at = datetime.now(timezone.utc).replace(microsecond=0)
+        expires_at = expires_at.replace(year=expires_at.year + 1)
+        approval = repository.create_approval(
+            incident_id=incident.id,
+            plan_hash="approval-plan-hash-1",
+            client_plan_id="plan-approval-1",
+            runbook_ref="restart_deployment@1",
+            target="payment-api",
+            parameters={"reason": "integration"},
+            risk_level="R1",
+            policy_version="mvp@1",
+            target_namespace="demo-shop",
+            target_kind="Deployment",
+            target_name="payment-api",
+            target_uid="fake-payment-api",
+            target_observed_generation=1,
+            target_resource_version="rv-1",
+            rationale="integration approval",
+            hypothesis_id="hyp-approval-1",
+            expires_at=expires_at,
+        )
+        assert approval["plan_id"] == "plan-approval-1"
+        assert approval["runbook_ref"] == "restart_deployment@1"
+        assert approval["target"] == "payment-api"
+        assert approval["parameters"] == {"reason": "integration"}
+        duplicate = repository.create_approval(
+            incident_id=incident.id,
+            plan_hash="approval-plan-hash-1",
+            client_plan_id="plan-approval-1",
+            runbook_ref="restart_deployment@1",
+            target="payment-api",
+            parameters={"reason": "integration"},
+            risk_level="R1",
+            policy_version="mvp@1",
+            target_namespace="demo-shop",
+            target_kind="Deployment",
+            target_name="payment-api",
+            target_uid="fake-payment-api",
+            target_observed_generation=1,
+            target_resource_version="rv-1",
+            rationale="integration approval",
+            hypothesis_id="hyp-approval-1",
+            expires_at=expires_at,
+        )
+        assert duplicate["id"] == approval["id"]
+        assert repository.decide_approval(
+            approval_id=UUID(approval["id"]),
+            incident_id=incident.id,
+            approved=True,
+            approver_id="approver-1",
+            reason="approved in integration",
+        )["status"] == "approved"
+        assert repository.decide_approval(
+            approval_id=UUID(approval["id"]),
+            incident_id=incident.id,
+            approved=False,
+            approver_id="approver-2",
+            reason="replay",
+        ) is None
+        with psycopg.connect(database_url) as connection:
+            assert connection.execute(
+                "SELECT count(*) FROM approval_decisions WHERE request_id = %s",
+                (approval["id"],),
+            ).fetchone()[0] == 1
+            assert connection.execute(
+                "SELECT count(*) FROM timeline_events WHERE incident_id = %s AND event_type LIKE %s",
+                (str(incident.id), "approval.%"),
+            ).fetchone()[0] == 2
+    finally:
+        admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        admin.close()
+
+
+@pytest.mark.integration
+def test_control_api_full_approval_is_persisted(monkeypatch):
+    admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
+    if not admin_url:
+        pytest.skip("未设置 SENTINEL_POSTGRES_ADMIN_URL")
+    psycopg = pytest.importorskip("psycopg")
+    database = f"sentinel_x_api_approval_{uuid4().hex[:10]}"
+    admin = psycopg.connect(admin_url, autocommit=True)
+    original_store = control_app.store
+    original_workflow_store = control_app.local_workflow.store
+    try:
+        admin.execute(f'CREATE DATABASE "{database}"')
+        database_url = admin_url.rsplit("/", 1)[0] + f"/{database}"
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setenv("DATABASE_URL", database_url)
+        monkeypatch.setenv("LOCAL_SESSION_SIGNING_KEY", "integration-session")
+        monkeypatch.setenv("ACTION_GATEWAY_URL", "http://gateway")
+        monkeypatch.setenv("ALERT_INGRESS_HMAC_KEY", "integration-alert")
+        with TestClient(control_app.app) as client:
+            incident = control_app.store.create_incident(
+                IncidentCreate(
+                    alert_source=AlertSource(
+                        alertmanager_id="integration",
+                        fingerprint="api-approval-fingerprint",
+                        alert_name="PaymentHighErrorRate",
+                        severity="warning",
+                        description="integration",
+                        started_at=datetime.now(timezone.utc),
+                    )
+                )
+            )
+            parameters = {"reason": "integration approval"}
+            plan_hash = compute_plan_hash(
+                "restart_deployment@1", "payment-api", parameters, incident.id
+            )
+            response = client.post(
+                f"/api/incidents/{incident.id}/approvals",
+                headers={"X-Sentinel-Role": "planner"},
+                json={
+                    "plan_id": "plan-api-approval",
+                    "runbook_ref": "restart_deployment@1",
+                    "target": "payment-api",
+                    "parameters": parameters,
+                    "risk_level": "R1",
+                    "plan_hash": plan_hash,
+                    "hypothesis_id": "hyp-api-approval",
+                },
+            )
+            assert response.status_code == 201, response.text
+            approval_id = response.json()["id"]
+            decision_response = client.put(
+                f"/api/incidents/{incident.id}/approvals/{approval_id}",
+                headers={"X-Sentinel-Role": "approver"},
+                json={"approved": True, "reason": "integration decision"},
+            )
+            assert decision_response.status_code == 200, decision_response.text
+            with psycopg.connect(database_url) as connection:
+                assert connection.execute(
+                    "SELECT count(*) FROM approval_requests WHERE id = %s",
+                    (approval_id,),
+                ).fetchone()[0] == 1
+                assert connection.execute(
+                    "SELECT decision FROM approval_decisions WHERE request_id = %s",
+                    (approval_id,),
+                ).fetchone()[0] == "approved"
+            restarted = control_app.PostgresStore(
+                PostgresIncidentRepository(lambda: psycopg.connect(database_url))
+            )
+            restored_approvals = restarted.list_approvals(incident.id)
+            assert len(restored_approvals) == 1
+            assert restored_approvals[0]["id"] == approval_id
+            assert restored_approvals[0]["runbook_ref"] == "restart_deployment@1"
+    finally:
+        control_app.store = original_store
+        control_app.local_workflow.store = original_workflow_store
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
         admin.close()

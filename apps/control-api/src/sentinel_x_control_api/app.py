@@ -29,7 +29,7 @@ import threading
 import time
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
@@ -828,6 +828,12 @@ class PostgresStore(InMemoryStore):
         self.repository = repository
         self._published_events = []
         self.rebuild_projection()
+        for approval in self.repository.list_approvals():
+            approval.setdefault("created_at", datetime.now().isoformat())
+            approval.setdefault("decided_at", None)
+            approval.setdefault("decided_by", None)
+            approval.setdefault("decision_reason", None)
+            self._approvals[approval["id"]] = approval
 
     def publish_outbox_event(self, event) -> None:
         """接收已发布事件，供当前进程的 SSE/通知消费者读取。"""
@@ -983,6 +989,102 @@ class PostgresStore(InMemoryStore):
         incident._timeline_seq = result.sequence
         incident.timeline.append(event)
         return event
+
+    def create_approval(
+        self,
+        incident_id: str,
+        data: ApprovalRequest,
+        allow_terminal_fixture: bool = False,
+    ) -> dict:
+        incident = self.get_incident(incident_id)
+        if not incident:
+            raise ValueError("事故不存在")
+        policy = check_mvp_policy(data.runbook_ref, data.target)
+        if not policy.allowed:
+            raise ValueError(policy.reason)
+        if data.risk_level != policy.risk_level:
+            raise ValueError("审批风险等级与登记的 Runbook 不一致")
+        expected_plan_hash = compute_plan_hash(
+            data.runbook_ref, data.target, data.parameters, incident_id
+        )
+        if data.plan_hash != expected_plan_hash:
+            raise ValueError("审批 plan hash 与规范化计划不一致")
+        if incident.status == IncidentStatus.DETECTED:
+            self.set_status(incident, IncidentStatus.TRIAGING, "进入审批前检查")
+            self.set_status(incident, IncidentStatus.DIAGNOSING, "完成基础诊断")
+            self.set_status(incident, IncidentStatus.PLAN_PROPOSED, "形成恢复计划")
+        if incident.status == IncidentStatus.PLAN_PROPOSED:
+            self.set_status(incident, IncidentStatus.AWAITING_APPROVAL, "等待人工批准 R1 动作")
+        if incident.status != IncidentStatus.AWAITING_APPROVAL and not (
+            allow_terminal_fixture
+            and incident.status in {IncidentStatus.RESOLVED, IncidentStatus.ESCALATED, IncidentStatus.FAILED}
+        ):
+            raise ValueError(f"当前状态不可创建审批: {incident.status.value}")
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+        approval = self.repository.create_approval(
+            incident_id=UUID(incident_id),
+            plan_hash=data.plan_hash,
+            client_plan_id=data.plan_id,
+            runbook_ref=data.runbook_ref,
+            target=data.target,
+            parameters=data.parameters,
+            risk_level=data.risk_level.value,
+            policy_version="mvp@1",
+            target_namespace="demo-shop",
+            target_kind="Deployment",
+            target_name=data.target,
+            target_uid=f"fake-{data.target}",
+            target_observed_generation=1,
+            target_resource_version="rv-1",
+            rationale=f"审批恢复计划 {data.hypothesis_id}",
+            hypothesis_id=data.hypothesis_id,
+            expires_at=expires_at,
+        )
+        approval.update(
+            runbook_ref=data.runbook_ref,
+            target=data.target,
+            parameters=data.parameters,
+            hypothesis_id=data.hypothesis_id,
+            created_at=datetime.now().isoformat(),
+            decided_at=None,
+            decided_by=None,
+            decision_reason=None,
+        )
+        self._approvals[approval["id"]] = approval
+        return approval
+
+    def decide_approval(
+        self,
+        approval_id: str,
+        decision: ApprovalDecision,
+        decided_by: str,
+        incident_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        approval = self._approvals.get(approval_id)
+        if not approval:
+            return None
+        result = self.repository.decide_approval(
+            approval_id=UUID(approval_id),
+            incident_id=UUID(incident_id) if incident_id else None,
+            approved=decision.approved,
+            approver_id=decided_by,
+            reason=decision.reason,
+        )
+        if result is None:
+            return None
+        approval.update(
+            status=result["status"],
+            version=result["version"],
+            decided_at=datetime.now().isoformat(),
+            decided_by=decided_by,
+            decision_reason=decision.reason,
+        )
+        return approval
+
+    def list_approvals(self, incident_id: Optional[str] = None) -> list[dict]:
+        return self.repository.list_approvals(
+            UUID(incident_id) if incident_id else None
+        )
 
 # ---------------------------------------------------------------------------
 # 全局存储实例
