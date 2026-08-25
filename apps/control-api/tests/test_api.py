@@ -153,6 +153,54 @@ class TestVersionedApi:
         assert response.status_code == 404
         assert "不存在" in response.json()["detail"]
 
+    async def test_v1_export_fails_closed_without_session_key(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", None)
+        response = await client.get("/api/v1/incidents/missing/export")
+        assert response.status_code == 503
+        assert "会话认证" in response.json()["detail"]
+
+    async def test_v1_export_returns_hashed_redacted_incident_package(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+        created = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "export-test",
+                "fingerprint": "fp-export-test",
+                "alert_name": "Export Test",
+                "severity": "warning",
+                "description": "exportable incident",
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        })
+        incident_id = created.json()["id"]
+        control_module.store.add_timeline_event(
+            incident_id,
+            "evidence.collected",
+            "diagnostic_gateway",
+            {
+                "token": "Bearer " + "s" * 40,
+                "nested": {"password": "secret-value"},
+                "summary": "safe evidence",
+            },
+        )
+        viewer = control_module.build_local_session_token("viewer", int(time.time()) + 300)
+
+        response = await client.get(
+            f"/api/v1/incidents/{incident_id}/export",
+            headers={"Authorization": viewer},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["schema_version"] == "1.0"
+        assert data["profile"] == "local-isolated-fixture"
+        assert data["manifest"]["timeline_events"] == 2
+        serialized = dict(data)
+        manifest = serialized.pop("manifest")
+        canonical = json.dumps(serialized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        assert manifest["content_sha256"] == "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        assert "secret-value" not in json.dumps(data, ensure_ascii=False)
+        assert "[REDACTED]" in json.dumps(data, ensure_ascii=False)
+
     async def test_v1_detail_returns_etag_and_requires_if_match_for_decision(self, client, monkeypatch):
         monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
         started = await client.post(

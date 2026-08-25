@@ -29,7 +29,7 @@
 - 固定评测 CLI：`python scripts/run_evaluation.py` 生成 B0/B1/C1 三套本地报告、manifest 和 checksums；holdout 强制每场景至少 10 次。报告仍标记 `light-fixture`，不可用于生产效果或准确率声明。
 - 场景 Runner：`python scripts/run_scenario_matrix.py --cycles 3` 已对固定六场景执行 18 次隔离注入/观测/cleanup，并在每轮检查环境 CLEAN；backend 为 in-memory fixture。
 - 固定攻击集：`python scripts/run_security_attack_set.py` 记录 10 个样本、危险拦截率、合法 R1 接受率和 dataset hash；这是 policy/参数静态门禁，不替代 Kubernetes RBAC/网络攻击测试。
-- 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。
+- 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。Control API 另有受 session 门控的 light 事故 JSON 导出，递归脱敏并返回内容 SHA-256，不等同于持久异步事故包。
 - 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈与 Kubernetes 权限清单静态检查及本地 fixture 证据包。
 
 ## 2. Claim 台账
@@ -43,7 +43,7 @@
 | CLM-05 | 零重复副作用 | I/T(partial) | “进程内锁覆盖同一幂等键的并发提交测试；不代表跨进程、重启或超时后的零副作用” | submit timeout/Worker restart/数据库唯一约束/并发报告 effect=0 |
 | CLM-06 | 固定攻击集拦截 | D | “定义了提示注入与越权攻击集” | 样本数、拒绝码、合法接受率、安全报告 |
 | CLM-07 | 自动/受控恢复 | D | “设计了自动恢复、restart、scale 三种可区分路径” | 因果对照、SLO observed window、recovery_actor |
-| CLM-08 | 可审计事故回放 | I/T(partial) | “light API 时间线支持 SSE sequence/Last-Event-ID，前端保留序号、退避重连和 REST 补读；持久化重放/导出包未完成” | refresh/reconnect/export E2E、事故包 hash |
+| CLM-08 | 可审计事故回放 | I/T(partial) | “light API 时间线支持 SSE sequence/Last-Event-ID，前端保留序号、退避重连和 REST 补读；新增 session 门控的脱敏 JSON 导出与内容 hash，但持久化重放/异步导出仍未完成” | refresh/reconnect/export E2E、事故包 hash |
 | CLM-09 | 本地 Kubernetes 最小权限 | I/T(partial) | “诊断 RBAC 仅允许 get/list/watch，执行 Role 限定 demo-shop 白名单 Deployment，Chaos ingress 限定 8082–8084；当前为清单静态测试” | kind/k3d manifests、can-i/API 负向测试、镜像 digest |
 | CLM-10 | 成本与资源治理 | D | “定义了 Token、查询和资源预算口径” | 每事故 Token/费用、CPU/内存/启动时间报告 |
 | CLM-11 | 本地可复现 | I/T(partial) | “根 pytest 使用动态端口/readiness/teardown 通过；尚未完成第二台干净环境 cold run” | 第二台干净环境 cold run、实际命令/时长 |
