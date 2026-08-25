@@ -47,3 +47,10 @@ spec:
         - namespaceSelector:
             matchLabels:
               name: sentinel-chaos
+      ports:
+        - protocol: TCP
+          port: 8082
+        - protocol: TCP
+          port: 8083
+        - protocol: TCP
+          port: 8084

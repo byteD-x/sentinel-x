@@ -30,7 +30,7 @@
 - 场景 Runner：`python scripts/run_scenario_matrix.py --cycles 3` 已对固定六场景执行 18 次隔离注入/观测/cleanup，并在每轮检查环境 CLEAN；backend 为 in-memory fixture。
 - 固定攻击集：`python scripts/run_security_attack_set.py` 记录 10 个样本、危险拦截率、合法 R1 接受率和 dataset hash；这是 policy/参数静态门禁，不替代 Kubernetes RBAC/网络攻击测试。
 - 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。
-- 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈静态 RBAC 检查与本地 fixture 证据包。
+- 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定 benchmark 实测仍未完成；当前仅完成 runner、观测栈与 Kubernetes 权限清单静态检查及本地 fixture 证据包。
 
 ## 2. Claim 台账
 
@@ -44,7 +44,7 @@
 | CLM-06 | 固定攻击集拦截 | D | “定义了提示注入与越权攻击集” | 样本数、拒绝码、合法接受率、安全报告 |
 | CLM-07 | 自动/受控恢复 | D | “设计了自动恢复、restart、scale 三种可区分路径” | 因果对照、SLO observed window、recovery_actor |
 | CLM-08 | 可审计事故回放 | I/T(partial) | “light API 时间线支持 SSE sequence/Last-Event-ID，前端保留序号、退避重连和 REST 补读；持久化重放/导出包未完成” | refresh/reconnect/export E2E、事故包 hash |
-| CLM-09 | 本地 Kubernetes 最小权限 | D | “规划了 namespace/RBAC/NetworkPolicy 权限矩阵” | manifests、can-i/API 负向测试、镜像 digest |
+| CLM-09 | 本地 Kubernetes 最小权限 | I/T(partial) | “诊断 RBAC 仅允许 get/list/watch，执行 Role 限定 demo-shop 白名单 Deployment，Chaos ingress 限定 8082–8084；当前为清单静态测试” | kind/k3d manifests、can-i/API 负向测试、镜像 digest |
 | CLM-10 | 成本与资源治理 | D | “定义了 Token、查询和资源预算口径” | 每事故 Token/费用、CPU/内存/启动时间报告 |
 | CLM-11 | 本地可复现 | I/T(partial) | “根 pytest 使用动态端口/readiness/teardown 通过；尚未完成第二台干净环境 cold run” | 第二台干净环境 cold run、实际命令/时长 |
 | CLM-12 | UI 指挥与审批体验 | I/T(partial) | “实现了角色可见性、SSE 连接状态/重连、审批完整上下文与理由化拒绝、演练预检；已通过本地构建和 lint” | 4 视口截图、无障碍/并发/权限测试 |
