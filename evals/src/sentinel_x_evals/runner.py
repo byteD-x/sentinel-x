@@ -52,6 +52,16 @@ class EvalConfig:
     policy_ref: str | None = None
     prompt_ref: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.dataset not in {"dev", "calibration", "holdout"}:
+            raise ValueError("dataset 必须是 dev、calibration 或 holdout")
+        if self.runs_per_scenario < 1:
+            raise ValueError("runs_per_scenario 必须大于 0")
+        if self.dataset == "holdout" and self.runs_per_scenario < 10:
+            raise ValueError("holdout 至少需要每场景 10 次运行")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds 必须大于 0")
+
 
 @dataclass(frozen=True)
 class ScenarioObservation:

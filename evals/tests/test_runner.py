@@ -97,6 +97,13 @@ def test_runner_requires_explicit_executor():
         EvalRunner(EvalConfig(model_name="investigator-v1"), executor=None)
 
 
+def test_eval_config_rejects_invalid_dataset_and_small_holdout():
+    with pytest.raises(ValueError, match="dataset"):
+        EvalConfig(model_name="x", dataset="production")
+    with pytest.raises(ValueError, match="10"):
+        EvalConfig(model_name="x", dataset="holdout", runs_per_scenario=3)
+
+
 @pytest.mark.asyncio
 async def test_saved_report_preserves_executor_failure_as_a_sanitized_archive_record(tmp_path):
     async def execute_scenario(_scenario_name, _run_index, _config):
