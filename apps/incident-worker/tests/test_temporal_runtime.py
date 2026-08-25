@@ -88,6 +88,10 @@ async def test_temporal_workflow_resolves_after_matching_approval(monkeypatch):
 
     assert result.status == "RESOLVED"
     assert result.execution_id == "execution-1"
+    assert [item["event_type"] for item in result.workflow_event_refs] == [
+        "evidence.collected",
+        "action.completed",
+    ]
     assert result.history == [
         "DETECTED",
         "TRIAGING",

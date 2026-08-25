@@ -93,6 +93,7 @@ class IncidentWorkflowResult:
     execution_id: str | None = None
     verification: dict[str, Any] = field(default_factory=dict)
     failure_reason: str | None = None
+    workflow_event_refs: list[dict[str, str]] = field(default_factory=list)
 
 
 @activity.defn(name="collect_incident_evidence")
@@ -142,6 +143,7 @@ class TemporalIncidentWorkflow:
         self._verification: dict[str, Any] = {}
         self._execution_id: str | None = None
         self._failure_reason: str | None = None
+        self._workflow_event_refs: list[dict[str, str]] = []
 
     @workflow.signal(name="approval_decision")
     async def approval_decision(self, decision: ApprovalDecision) -> None:
@@ -160,12 +162,13 @@ class TemporalIncidentWorkflow:
     async def run(self, input: IncidentWorkflowInput) -> IncidentWorkflowResult:
         try:
             self._transition("TRIAGING")
-            await workflow.execute_activity(
+            evidence = await workflow.execute_activity(
                 collect_incident_evidence,
                 input,
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=OBSERVATION_RETRY_POLICY,
             )
+            self._record_workflow_event_ref("evidence.collected", evidence.get("evidence_id"))
 
             self._transition("DIAGNOSING")
             self._transition("PLAN_PROPOSED")
@@ -200,6 +203,7 @@ class TemporalIncidentWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=1),
             )
             self._execution_id = action.get("execution_id")
+            self._record_workflow_event_ref("action.completed", self._execution_id)
             if action.get("status") != "succeeded":
                 return self._fail(action.get("error") or "动作执行失败")
 
@@ -214,6 +218,9 @@ class TemporalIncidentWorkflow:
                 ),
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=OBSERVATION_RETRY_POLICY,
+            )
+            self._record_workflow_event_ref(
+                "recovery.verified", self._verification.get("verified_at")
             )
             if not self._verification.get("recovered", False):
                 return self._fail(
@@ -257,6 +264,13 @@ class TemporalIncidentWorkflow:
         self._failure_reason = reason
         return self._result()
 
+    def _record_workflow_event_ref(self, event_type: str, reference: Any) -> None:
+        if reference is None:
+            return
+        self._workflow_event_refs.append(
+            {"event_type": event_type, "reference": str(reference)}
+        )
+
     def _result(self) -> IncidentWorkflowResult:
         return IncidentWorkflowResult(
             status=self._status,
@@ -265,6 +279,7 @@ class TemporalIncidentWorkflow:
             execution_id=self._execution_id,
             verification=dict(self._verification),
             failure_reason=self._failure_reason,
+            workflow_event_refs=list(self._workflow_event_refs),
         )
 
 
