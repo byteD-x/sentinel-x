@@ -53,6 +53,8 @@
 
 辅助资料：[ADR 索引](adr/README.md)、[官方参考](references.md)、[贡献指南](../CONTRIBUTING.md)、[安全报告政策](../SECURITY.md)、[Agent 规则](../AGENTS.md)。
 
+当前实现进度与验证记录见 [.codex/mvp-progress.md](../.codex/mvp-progress.md)。
+
 ## 3. 唯一事实来源
 
 | 事实 | 唯一详细来源 | 其他文档如何使用 |
