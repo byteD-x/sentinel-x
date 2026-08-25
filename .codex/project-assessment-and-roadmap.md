@@ -12,8 +12,8 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | --- | --- | --- |
 | 产品/架构设计 | 较成熟 | 产品需求、状态机、安全边界、Runbook、评测口径和发布门禁文档较完整 |
 | Light 原型可演示度 | 中高 | 本地 API、Web Console、Terminal Console 和六个场景 fixture 可运行；Temporal/审批/SLO 已有可验证 thin slice |
-| Full MVP 完成度 | 中 | Temporal durable thin slice、观测样本验证和 SQLite 审批持久化已落地，但 PostgreSQL、真实 K8s、full E2E 和 benchmark 仍未完成 |
-| 生产可用度 | 不具备 | 无正式身份认证、无 PostgreSQL 权威投影、真实执行器和 full 观测闭环仍未完成 |
+| Full MVP 完成度 | 中高（本地 full thin slice） | PostgreSQL 权威领域持久化、受限遥测/Kubernetes adapter、Action HTTP 协调和审批资源已落地；真实集群、跨服务事务、full E2E 和 benchmark 仍未完成 |
+| 生产可用度 | 不具备 | 正式 OIDC/TokenReview/mTLS、真实执行器、跨投影 crash/reconcile 和 full 观测闭环仍未完成 |
 | 面试展示价值 | 高 | 能展示 Agent 边界、状态机、审批、幂等、失败升级和证据账本；必须主动披露限制 |
 
 这里的“完成度”是基于代码、文档和本地命令的工程判断，不是正式 KPI。若按产品 MVP 的 11 项功能需求粗略折算，当前大约处于 **45%–55% 的可验收完成度**：light 与单场景 durable thin slice 已有测试证据，但真正达到 full E2E 验收的部分仍有限。
@@ -132,7 +132,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | --- | --- | --- |
 | Temporal 是否真的 durable？ | 单场景 thin slice 是：已在 Temporal SDK 测试服务器执行 Workflow/Activity/Signal、replay 和 Worker restart；多场景 full profile 仍未完成 | 扩展到单场景 DB 投影对账，再提交三处重启、history refs 和 full profile 证据 |
 | Action 是否真的改了 Kubernetes？ | 否，`execution_mode=fixture`，只模拟 before/after | fake K8s API 验证状态变化，再做隔离集群 E2E；加入 timeout/reconcile |
-| 如何保证审批不能被篡改或重放？ | light 有 hash/HMAC/目标身份校验；SQLite 已覆盖重启恢复和跨连接原子一次性消费；PostgreSQL 绑定和服务身份仍未完成 | PostgreSQL 不可变 ApprovalDecision、唯一约束、目标 UID/generation、TokenReview 和跨服务并发测试 |
+| 如何保证审批不能被篡改或重放？ | light 有 hash/HMAC/目标身份校验；SQLite/PostgreSQL 已覆盖重启/跨连接原子一次性消费，full 另有 control-api 服务签名 | 正式 TokenReview/mTLS、跨服务事务和跨服务并发/网络分区测试 |
 | 根因准确率是多少？ | 没有可对外发布的 Top-1；当前 fixture evaluator 不是 benchmark | 先跑 B0/B1 基线，再跑 C1 holdout，披露样本数、失败分类和区间 |
 | 为什么不用 LangGraph/Kafka？ | 当前设计刻意避免双编排和无必要基础设施 | 说明 Temporal/PostgreSQL 的职责边界和 ADR，展示被拒绝方案及成本 |
 | 测试是否足够？ | light 单元/接口测试较好，full 集成和安全发布门禁不足 | 增加 CI、契约测试、fake K8s、migration、replay、E2E 和攻击集报告 |
