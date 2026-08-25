@@ -36,6 +36,6 @@ def test_full_profile_requires_postgres_and_security_configuration():
 async def test_full_profile_lifespan_fails_closed_before_local_fallback(monkeypatch):
     monkeypatch.setenv("SENTINEL_PROFILE", "full")
 
-    with pytest.raises(RuntimeError, match="PostgreSQL repository/projection"):
+    with pytest.raises(RuntimeError, match="缺少 DATABASE_URL"):
         async with lifespan(FastAPI()):
             pytest.fail("full profile 不应回退到本地 SQLite")
