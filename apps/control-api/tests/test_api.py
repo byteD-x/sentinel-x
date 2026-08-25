@@ -229,6 +229,30 @@ class TestVersionedApi:
         )
         assert stale.status_code == 412
 
+    async def test_full_v1_mutation_requires_csrf_token(self, client, monkeypatch):
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+        planner = control_module.build_local_session_token("scenario_operator", int(time.time()) + 300)
+        response = await client.post(
+            "/api/v1/scenarios/inventory-latched-5xx@1/run",
+            headers={"Authorization": planner},
+        )
+        assert response.status_code == 403
+        assert "CSRF" in response.json()["detail"]
+
+    async def test_full_v1_mutation_accepts_signed_csrf_token(self, client, monkeypatch):
+        monkeypatch.setenv("SENTINEL_PROFILE", "full")
+        monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", "test-session-secret")
+        session = control_module.build_local_session_token("scenario_operator", int(time.time()) + 300)
+        csrf = hmac.new(
+            b"test-session-secret", f"csrf:{session}".encode(), hashlib.sha256
+        ).hexdigest()
+        response = await client.post(
+            "/api/v1/scenarios/inventory-latched-5xx@1/run",
+            headers={"Authorization": session, "X-CSRF-Token": csrf},
+        )
+        assert response.status_code == 202
+
 
 @pytest.mark.asyncio
 class TestEvaluations:

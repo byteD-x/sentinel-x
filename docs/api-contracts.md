@@ -2,7 +2,7 @@
 
 ## 1. 状态与事实来源
 
-本文定义目标 API 语义和安全边界。当前仓库同时保留兼容的 `/api/...` light 路径和受 session 门控的 `/api/v1` 路径；`/api/v1/webhooks/alertmanager` 接收固定 Alertmanager payload，要求时间戳、nonce、HMAC 和有界 body。浏览器 OIDC/CSRF、TokenReview/DB 绑定审批和 `/internal/v1` 仍未完成。light Control API 用 `X-Sentinel-Role` 实现本地演示能力门控，不能作为认证；Action Gateway 已要求独立的不可变审批记录、目标 namespace/kind/name/UID/generation 和一次性消费，配置 `SENTINEL_APPROVAL_STORE_DB` 后可使用 SQLite 持久记录并跨连接原子消费，但尚未达到 PostgreSQL 数据库绑定和跨服务事务门禁。Action Gateway 另有显式 `fake-k8s` 隔离执行器，验证 Deployment 状态变化和失败注入，不改变 light 默认 fixture，也不代表真实 Kubernetes 写入。light 场景启动会创建内存事故、证据和审批记录；批准后的执行/验证事件是 `light-fixture`，不代表真实 Kubernetes 写入。
+本文定义目标 API 语义和安全边界。当前仓库同时保留兼容的 `/api/...` light 路径和受 session 门控的 `/api/v1` 路径；`/api/v1/webhooks/alertmanager` 接收固定 Alertmanager payload，要求时间戳、nonce、HMAC 和有界 body。full local-session 的状态变更还要求由会话签名派生的 `X-CSRF-Token`（`HMAC(session_signing_key, "csrf:" + Authorization)`）；正式浏览器 OIDC/服务身份、TokenReview/DB 绑定审批和 `/internal/v1` 仍未完成。light Control API 用 `X-Sentinel-Role` 实现本地演示能力门控，不能作为认证；Action Gateway 已要求独立的不可变审批记录、目标 namespace/kind/name/UID/generation 和一次性消费，full profile 使用 PostgreSQL 权威审批/执行记录，但 TokenReview 和跨服务事务仍未完成。Action Gateway 另有显式 `fake-k8s` 隔离执行器，验证 Deployment 状态变化和失败注入，不改变 light 默认 fixture，也不代表真实 Kubernetes 写入。light 场景启动会创建内存事故、证据和审批记录；批准后的执行/验证事件是 `light-fixture`，不代表真实 Kubernetes 写入。
 
 实现收敛前，本文是目标契约；代码与测试只能证明 prototype 行为。完成 D1/D2 门禁后，版本化 OpenAPI、生成的 JSON Schema 和契约测试才成为执行事实来源；本文继续维护跨端点规则和设计理由。
 

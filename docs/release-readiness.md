@@ -44,7 +44,7 @@
 
 当前阻塞：
 
-- Control API 已提供 `/api/v1`、local-only 短期 HMAC session、ETag/If-Match；light 仍使用 SQLite outbox，full profile 已接入 PostgreSQL Incident/Timeline/Approval 写入、权威时间线读取、审批一次性决定与启动读模型重建，仍缺 OIDC/CSRF、Action 跨服务授权事务。
+- Control API 已提供 `/api/v1`、local-only 短期 HMAC session、full mutation 的 CSRF 双提交校验和 ETag/If-Match；light 仍使用 SQLite outbox，full profile 已接入 PostgreSQL Incident/Timeline/Approval 写入、权威时间线读取、审批一次性决定与启动读模型重建，仍缺 OIDC/TokenReview、Action 跨服务授权事务。
 - Action Gateway 已默认 fail-closed，并校验 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份和一次性消费；light SQLite backend 与 full PostgreSQL 权威审批读取/条件消费均已覆盖重启和单赢家验证，仍缺 TokenReview、服务身份和 ActionExecution 跨服务事务。
 - Alert Ingress 已校验时间戳、nonce、HMAC 和有界 body，并提供版本化 Alertmanager webhook 转换；仍未完成 PostgreSQL 去重事务和真实 Alertmanager/观测栈联调。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。

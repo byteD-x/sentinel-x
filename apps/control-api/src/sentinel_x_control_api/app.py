@@ -1285,6 +1285,17 @@ async def _require_v1_session(request: Request) -> None:
     ).hexdigest()
     if not hmac.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="v1 会话令牌签名无效")
+    if os.getenv("SENTINEL_PROFILE", "light") == "full" and request.method in {
+        "POST", "PUT", "PATCH", "DELETE"
+    }:
+        csrf = request.headers.get("X-CSRF-Token", "")
+        expected_csrf = hmac.new(
+            LOCAL_SESSION_SIGNING_KEY.encode("utf-8"),
+            f"csrf:{authorization}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(csrf, expected_csrf):
+            raise HTTPException(status_code=403, detail="full profile 需要有效 CSRF token")
     request.state.session_role = role
 
 
