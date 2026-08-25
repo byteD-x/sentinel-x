@@ -5,7 +5,7 @@
 | 层级 | 含义 | 当前状态 |
 | --- | --- | --- |
 | D0 Documentation Baseline | 完整设计与开发准备 | SUPERSEDED：已进入 light prototype 代码阶段 |
-| D1 Developer Preview | light 可运行，核心 contracts/Workflow fixture | READY（local-only）：统一本地 MVP 门禁已通过（Python/Web/Terminal、六场景 cleanup、攻击集、fixture 评测）；PostgreSQL、OIDC 和真实观测仍不在此层级 |
+| D1 Developer Preview | light 可运行，核心 contracts/Workflow fixture | READY（local-only）：统一本地 MVP 门禁已通过（Python/Web/Terminal、六场景 cleanup、攻击集、fixture 评测），并有 SQLite projection durable slice；PostgreSQL、OIDC 和真实观测仍不在此层级 |
 | D2 Demo MVP | full 六场景、两 R1、UI、固定 E2E | NOT_READY |
 | D3 Evidence Release | holdout benchmark、脱敏事故包、冷启动复现 | NOT_READY |
 
