@@ -17,5 +17,5 @@ route:
 receivers:
   - name: 'sentinel-webhook'
     webhook_configs:
-      - url: 'http://control-api.sentinel-system.svc.cluster.local:8000/api/incidents'
+      - url: 'http://control-api.sentinel-system.svc.cluster.local:8000/api/v1/webhooks/alertmanager'
         send_resolved: true

@@ -346,6 +346,75 @@ class TestEvaluations:
 
 @pytest.mark.asyncio
 class TestIncidents:
+    async def test_alertmanager_webhook_is_converted_to_incident(self, client):
+        body = {
+            "receiver": "sentinel-webhook",
+            "status": "firing",
+            "alerts": [{
+                "status": "firing",
+                "labels": {"alertname": "HighErrorRate", "severity": "critical", "service": "inventory-api"},
+                "annotations": {"summary": "inventory error rate high"},
+                "startsAt": "2026-08-25T04:00:00Z",
+                "endsAt": "0001-01-01T00:00:00Z",
+                "fingerprint": "alertmanager-fingerprint-001",
+                "generatorURL": "https://prometheus.invalid/graph",
+            }],
+        }
+        raw_body = json.dumps(body, separators=(",", ":")).encode()
+        timestamp = str(int(time.time()))
+        nonce = "alertmanager-webhook-nonce"
+        signature = hmac.new(
+            b"test-alert-ingress-secret",
+            timestamp.encode() + b"\n" + nonce.encode() + b"\n" + raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+        response = await client.post(
+            "/api/v1/webhooks/alertmanager",
+            content=raw_body,
+            headers={
+                "content-type": "application/json",
+                "X-Sentinel-Timestamp": timestamp,
+                "X-Sentinel-Nonce": nonce,
+                "X-Sentinel-Signature": f"sha256={signature}",
+            },
+        )
+
+        assert response.status_code == 202
+        assert response.json()["status"] == "accepted"
+        incident = control_module.store.get_incident(response.json()["id"])
+        assert incident is not None
+        assert incident.severity is IncidentSeverity.CRITICAL
+        assert incident.fingerprint == "alertmanager-fingerprint-001"
+
+    async def test_alert_ingress_body_limit_is_enforced(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "ALERT_INGRESS_MAX_BODY_BYTES", 32)
+        body = json.dumps({
+            "alert_source": {
+                "alertmanager_id": "body-limit",
+                "fingerprint": "body-limit",
+                "alert_name": "Body Limit",
+                "severity": "warning",
+                "description": "x" * 64,
+                "started_at": "2026-08-01T21:00:00Z",
+            }
+        }, separators=(",", ":")).encode()
+        timestamp = str(int(time.time()))
+        response = await client.post(
+            "/api/incidents",
+            content=body,
+            headers={
+                "X-Sentinel-Timestamp": timestamp,
+                "X-Sentinel-Nonce": "body-limit",
+                "X-Sentinel-Signature": "sha256=" + hmac.new(
+                    b"test-alert-ingress-secret",
+                    timestamp.encode() + b"\nbody-limit\n" + body,
+                    hashlib.sha256,
+                ).hexdigest(),
+            },
+        )
+
+        assert response.status_code == 413
+
     async def test_create_incident(self, client):
         response = await client.post("/api/incidents", json={
             "alert_source": {

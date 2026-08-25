@@ -121,6 +121,29 @@ class IncidentCreate(StrictBaseModel):
     alert_source: AlertSource
 
 
+class AlertmanagerAlert(BaseModel):
+    """Alertmanager webhook 中被 Control API 使用的字段。"""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    status: str = "firing"
+    labels: dict[str, str] = Field(default_factory=dict)
+    annotations: dict[str, str] = Field(default_factory=dict)
+    starts_at: datetime = Field(alias="startsAt")
+    ends_at: Optional[datetime] = Field(default=None, alias="endsAt")
+    fingerprint: Optional[str] = None
+
+
+class AlertmanagerWebhook(BaseModel):
+    """版本化 webhook 输入；未知顶层字段不进入领域模型。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    receiver: str = ""
+    status: str = "firing"
+    alerts: list[AlertmanagerAlert] = Field(default_factory=list, max_length=50)
+
+
 class IncidentResponse(BaseModel):
     id: str
     fingerprint: Optional[str] = None
@@ -711,6 +734,7 @@ LOCAL_STATE_PATH = Path(os.getenv("SENTINEL_LOCAL_STATE_DB", ".local/data/contro
 store = InMemoryStore(state_path=LOCAL_STATE_PATH)
 local_workflow = LocalExerciseWorkflow(store, scenarios_dir=SCENARIOS_DIR)
 ALERT_INGRESS_HMAC_KEY = os.getenv("ALERT_INGRESS_HMAC_KEY")
+ALERT_INGRESS_MAX_BODY_BYTES = int(os.getenv("ALERT_INGRESS_MAX_BODY_BYTES", "1048576"))
 ALERT_INGRESS_CLOCK_SKEW_SECONDS = 300
 ALERT_INGRESS_REPLAY_TTL_SECONDS = int(os.getenv("ALERT_INGRESS_REPLAY_TTL_SECONDS", "300"))
 ALERT_INGRESS_REPLAY_MAX_ENTRIES = int(os.getenv("ALERT_INGRESS_REPLAY_MAX_ENTRIES", "10000"))
@@ -749,6 +773,23 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    """在 Pydantic 解析前拒绝明显超限的 webhook 请求体。"""
+    content_length = request.headers.get("content-length")
+    if content_length and request.url.path in {"/api/incidents", "/api/v1/webhooks/alertmanager"}:
+        try:
+            too_large = int(content_length) > ALERT_INGRESS_MAX_BODY_BYTES
+        except ValueError:
+            too_large = True
+        if too_large:
+            return JSONResponse(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                content={"detail": "Alert Ingress 请求体超过上限"},
+            )
+    return await call_next(request)
+
+
 def _require_role(role: Optional[str], *allowed_roles: str) -> str:
     """所有会改变控制面状态的端点都显式要求调用方角色。"""
     normalized = role or "viewer"
@@ -781,6 +822,8 @@ async def _verify_alert_ingress(request: Request) -> None:
     if abs(datetime.now().timestamp() - timestamp_value) > ALERT_INGRESS_CLOCK_SKEW_SECONDS:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Alert Ingress 签名已过期")
     raw_body = await request.body()
+    if len(raw_body) > ALERT_INGRESS_MAX_BODY_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Alert Ingress 请求体超过上限")
     expected = hmac.new(
         ALERT_INGRESS_HMAC_KEY.encode("utf-8"),
         timestamp.encode("utf-8") + b"\n" + nonce.encode("utf-8") + b"\n" + raw_body,
@@ -1103,6 +1146,39 @@ async def create_incident(data: IncidentCreate, request: Request):
         "status": incident.status.value,
         "alert_name": incident.alert_name,
         "created_at": incident.created_at.isoformat(),
+    }
+
+
+@app.post("/api/v1/webhooks/alertmanager", status_code=status.HTTP_202_ACCEPTED)
+async def receive_alertmanager_webhook(data: AlertmanagerWebhook, request: Request):
+    """接收受 HMAC 保护的 Alertmanager webhook 并转换为领域告警。"""
+    await _verify_alert_ingress(request)
+    firing = next((alert for alert in data.alerts if alert.status == "firing"), None)
+    if firing is None:
+        return {"status": "ignored", "reason": "没有 firing 告警"}
+    labels = firing.labels
+    try:
+        severity = IncidentSeverity(labels.get("severity", "warning"))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Alertmanager severity 非法") from None
+    fingerprint = firing.fingerprint or hashlib.sha256(
+        json.dumps(labels, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    alert_name = labels.get("alertname", "AlertmanagerAlert")
+    source = AlertSource(
+        alertmanager_id=data.receiver or "alertmanager",
+        fingerprint=fingerprint,
+        alert_name=alert_name,
+        severity=severity,
+        description=firing.annotations.get("description") or firing.annotations.get("summary") or alert_name,
+        started_at=firing.starts_at,
+    )
+    incident = store.create_incident(IncidentCreate(alert_source=source))
+    return {
+        "status": "accepted",
+        "id": incident.id,
+        "fingerprint": incident.fingerprint,
+        "incident_status": incident.status.value,
     }
 
 
