@@ -36,6 +36,7 @@ from sentinel_x_domain.services import compute_plan_hash
 from sentinel_x_action_gateway.approval_store import (
     ApprovalRecord,
     ApprovalStore,
+    PostgresApprovalStore,
     TargetIdentity,
     build_approval_store,
 )
@@ -493,7 +494,22 @@ class ActionGate:
 
 
 store = ExecutionStore()
-approval_store = build_approval_store(os.getenv("SENTINEL_APPROVAL_STORE_DB"))
+
+
+def _build_runtime_approval_store():
+    if os.getenv("SENTINEL_PROFILE", "light") != "full":
+        return build_approval_store(os.getenv("SENTINEL_APPROVAL_STORE_DB"))
+    database_url = os.getenv("DATABASE_URL", "")
+    if not database_url.startswith(("postgresql://", "postgresql+")):
+        raise RuntimeError("SENTINEL_PROFILE=full Action Gateway 缺少 PostgreSQL DATABASE_URL")
+    try:
+        psycopg = __import__("psycopg")
+    except ImportError as exc:
+        raise RuntimeError("SENTINEL_PROFILE=full Action Gateway 需要 psycopg") from exc
+    return PostgresApprovalStore(lambda: psycopg.connect(database_url))
+
+
+approval_store = _build_runtime_approval_store()
 
 
 def _build_executor() -> ActionExecutor:
@@ -533,6 +549,16 @@ gate = ActionGate(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if os.getenv("SENTINEL_PROFILE", "light") == "full":
+        connection = approval_store._connect
+        database = connection()
+        try:
+            with database.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                if cursor.fetchone() != (1,):
+                    raise RuntimeError("Action Gateway PostgreSQL health check 返回异常")
+        finally:
+            database.close()
     yield
 
 
