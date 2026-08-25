@@ -16,6 +16,7 @@ fixture、静态契约或本地测试升级成真实 full profile 证据。
 | Action Gateway | TESTED | fixture 默认 fail-closed、显式 `fake-k8s` profile、目标身份/失败注入 |
 | Diagnostics | TESTED | 固定 Prometheus/Loki/Tempo endpoint 的只读 source、查询边界、响应大小与脱敏 |
 | Observability manifests | STATIC-TESTED | Prometheus/Loki/Tempo/OTel Kustomize stack；固定镜像、非 root、资源上限 |
+| Kubernetes security manifests | STATIC-TESTED | 诊断只读、执行 Deployment 白名单、Chaos ingress 端口约束；`python -m pytest -q infra/tests`；未替代集群 API `can-i` |
 | Security | TESTED | 10 个固定攻击样本，危险拦截率 100%，合法 R1 接受率 100% |
 | Evidence | TESTED | manifest/checksums/敏感扫描/verification report |
 
