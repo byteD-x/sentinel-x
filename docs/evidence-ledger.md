@@ -27,6 +27,9 @@
 - Action Gateway 执行器切片：新增可替换执行器边界和受控 fake Kubernetes Deployment API，验证 restart/scale、UID/generation 漂移、ready 状态及 timeout/partial-ready/unknown；仅为隔离测试实现，不等同于真实 Kubernetes API 或 full profile。
 - 隔离 full profile 切片：Action Gateway 通过 `SENTINEL_EXECUTION_MODE=fake-k8s` 显式选择受控 fake Kubernetes 执行器，并为 demo-shop Deployment 注册固定身份；默认仍为 fixture 且 kill switch 默认开启。该切片支持 API 级 before/after 状态证据，不等同于真实集群写入。
 - 固定评测 CLI：`python scripts/run_evaluation.py` 生成 B0/B1/C1 三套本地报告、manifest 和 checksums；holdout 强制每场景至少 10 次。报告仍标记 `light-fixture`，不可用于生产效果或准确率声明。
+- 场景 Runner：`python scripts/run_scenario_matrix.py --cycles 3` 已对固定六场景执行 18 次隔离注入/观测/cleanup，并在每轮检查环境 CLEAN；backend 为 in-memory fixture。
+- 固定攻击集：`python scripts/run_security_attack_set.py` 记录 10 个样本、危险拦截率、合法 R1 接受率和 dataset hash；这是 policy/参数静态门禁，不替代 Kubernetes RBAC/网络攻击测试。
+- 证据包：`python scripts/build_evidence_bundle.py` 生成 manifest、checksums、敏感扫描和 verification report；当前包只包含脱敏 fixture 产物。
 - 限制：full Kubernetes/observability E2E、数据库绑定审批授权和固定 benchmark 实测仍未完成；当前仅完成 runner 与本地 fixture 证据包。
 
 ## 2. Claim 台账
