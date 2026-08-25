@@ -24,4 +24,4 @@ scrape_configs:
           names: [sentinel-system]
 
 rule_files:
-  - '/etc/prometheus/rules/sentinel-alerts.yaml'
+  - '/etc/prometheus/rules/alert-rules.yaml'
