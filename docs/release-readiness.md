@@ -5,7 +5,7 @@
 | 层级 | 含义 | 当前状态 |
 | --- | --- | --- |
 | D0 Documentation Baseline | 完整设计与开发准备 | SUPERSEDED：已进入 light prototype 代码阶段 |
-| D1 Developer Preview | light 可运行，核心 contracts/Workflow fixture | PARTIAL：本地测试、前端构建/lint 已通过；正式契约、持久化和生产身份授权仍未关闭 |
+| D1 Developer Preview | light 可运行，核心 contracts/Workflow fixture | READY（local-only）：本地测试、前端构建/lint、版本化 API、SQLite outbox 与隔离 fake-k8s 已通过；PostgreSQL、OIDC 和真实观测仍不在此层级 |
 | D2 Demo MVP | full 六场景、两 R1、UI、固定 E2E | NOT_READY |
 | D3 Evidence Release | holdout benchmark、脱敏事故包、冷启动复现 | NOT_READY |
 
@@ -44,15 +44,17 @@
 
 当前阻塞：
 
-- Control API 与 API 契约仍有 `/api` vs `/api/v1`、认证/CSRF/HMAC/幂等/ETag 等差距。
+- Control API 已提供 `/api/v1`、local-only 短期 HMAC session、ETag/If-Match 和 SQLite outbox；仍缺 OIDC/CSRF、PostgreSQL 权威投影和跨服务事务。
 - Action Gateway 已默认 fail-closed，并校验本地 HMAC 审批凭证、audience、管理员令牌、独立审批记录、目标身份和一次性消费；SQLite local backend 已覆盖重启恢复与 SQL 条件更新原子消费，但仍未实现 PostgreSQL 绑定审批读取、TokenReview 和跨服务事务。
 - Alert Ingress 已校验时间戳、nonce 和 HMAC，并在 local profile 使用有界 replay cache；body 上限和正式 Alertmanager webhook 契约仍未实现。
 - Control API 的 `X-Sentinel-Role` 只提供 local-demo 角色门控，不是浏览器会话、OIDC 或服务身份认证。
 - light Workflow fixture 的动作执行仍是模拟路径，但恢复结论已改为读取受控观测样本；另有单场景 `SentinelIncidentWorkflow` 已注册真实 Temporal Worker，并通过 SDK 测试服务器执行、Signal、Worker restart 和 history replay。
-- full 多场景 Temporal replay、PostgreSQL migration、projection/outbox 和 full observability E2E 未完成。
+- full 多场景 Temporal replay、PostgreSQL migration/projection 和 full observability E2E 未完成；当前 outbox 仅为 local SQLite 可恢复切片。
 - 默认质量门禁需持续覆盖全部真实测试目录，并保留原始输出。
 
 ## 5. D2 Demo MVP 门禁
+
+当前状态：NOT_READY。已完成隔离执行器接入和固定评测 CLI，但真实 kind/k3d、观测查询、六场景注入/cleanup 与 full E2E 仍未通过。
 
 ### 环境与功能
 
