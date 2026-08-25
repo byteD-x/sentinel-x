@@ -18,6 +18,17 @@ from sentinel_x_action_gateway.executor import (
     FakeKubernetesExecutor,
     TargetIdentityMismatch,
 )
+
+
+def test_gateway_app_can_select_fake_k8s_executor(monkeypatch):
+    """隔离 full profile 通过环境变量启用 fake-k8s，默认路径不受影响。"""
+    monkeypatch.setenv("SENTINEL_EXECUTION_MODE", "fake-k8s")
+    import sentinel_x_action_gateway.app as gateway_app
+
+    executor = gateway_app._build_executor()
+    assert executor.execution_mode == "fake-k8s"
+    deployment = executor.api.get_current("demo-shop", "Deployment", "inventory-api")
+    assert deployment.replicas == deployment.ready_replicas == 3
 from sentinel_x_contracts import RiskLevel
 from sentinel_x_domain.services import compute_plan_hash
 
