@@ -42,6 +42,8 @@ from sentinel_x_action_gateway.approval_store import (
 from sentinel_x_action_gateway.executor import (
     ActionExecutionResult,
     ActionExecutor,
+    FakeKubernetesApi,
+    FakeKubernetesExecutor,
     FixtureActionExecutor,
 )
 
@@ -492,12 +494,40 @@ class ActionGate:
 
 store = ExecutionStore()
 approval_store = build_approval_store(os.getenv("SENTINEL_APPROVAL_STORE_DB"))
+
+
+def _build_executor() -> ActionExecutor:
+    """按 profile 选择执行器；fake-k8s 只允许显式隔离环境开启。"""
+    if os.getenv("SENTINEL_EXECUTION_MODE", "fixture") != "fake-k8s":
+        return FixtureActionExecutor()
+    api = FakeKubernetesApi()
+    for name in ("order-api", "inventory-api", "payment-api", "order-worker", "inventory-worker", "payment-worker"):
+        api.register_deployment(
+            TargetIdentity(
+                namespace="demo-shop",
+                kind="Deployment",
+                name=name,
+                uid=f"fake-{name}",
+                generation=1,
+            )
+        )
+    return FakeKubernetesExecutor(api)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
 gate = ActionGate(
     store=store,
     approval_store=approval_store,
-    kill_switch=True,
+    kill_switch=_env_bool("SENTINEL_KILL_SWITCH", True),
     approval_token_secret=os.getenv("SENTINEL_APPROVAL_TOKEN_SECRET"),
     admin_token=os.getenv("SENTINEL_ADMIN_TOKEN"),
+    executor=_build_executor(),
 )
 
 
