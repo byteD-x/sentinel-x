@@ -30,6 +30,7 @@ from sentinel_x_diagnostics import (
     validate_tool_params,
     sanitize_result,
 )
+from sentinel_x_diagnostics.sources import HttpTelemetrySource, TelemetrySourceError
 
 logger = logging.getLogger(__name__)
 
@@ -294,10 +295,12 @@ class DiagnosticGateway:
         context: Optional[ScenarioContext] = None,
         random_seed: int = 42,
         simulate_latency: bool = True,
+        source: HttpTelemetrySource | None = None,
     ):
         self.context = context or ScenarioContext()
         self._rng = random.Random(random_seed)
         self.simulate_latency = simulate_latency
+        self.source = source
 
         # 调用计数
         self._call_counts: dict[DiagnosticToolType, int] = {
@@ -378,6 +381,29 @@ class DiagnosticGateway:
         tool_def: ToolDefinition,
     ) -> DiagnosticResult:
         """执行具体查询并返回结果。"""
+
+        if self.source is not None and tool in {
+            DiagnosticToolType.QUERY_PROMETHEUS,
+            DiagnosticToolType.QUERY_LOKI,
+            DiagnosticToolType.QUERY_TEMPO,
+        }:
+            try:
+                response = self.source.query(tool, params)
+            except TelemetrySourceError:
+                raise
+            sanitized, truncated = sanitize_result(
+                str(response.payload), max_bytes=tool_def.max_result_bytes
+            )
+            self._total_bytes += len(sanitized.encode("utf-8"))
+            return DiagnosticResult(
+                tool=tool,
+                parameters=params,
+                summary=str(response.payload.get("data", response.payload.get("status", "遥测响应")))[:200],
+                source_ref=response.source_ref,
+                evidence_id=uuid4(),
+                truncated=truncated,
+                result_size_bytes=len(sanitized.encode("utf-8")),
+            )
 
         # 确定场景模板
         template = self._resolve_template()
