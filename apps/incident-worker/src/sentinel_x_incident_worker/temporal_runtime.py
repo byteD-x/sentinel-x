@@ -17,6 +17,7 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from sentinel_x_incident_worker.activities import (
         collect_prometheus_evidence,
+        reconcile_postgres_projection,
         submit_action_to_gateway,
         verify_slo_recovery,
     )
@@ -86,6 +87,12 @@ class VerificationRequest:
 
 
 @dataclass
+class ProjectionReconciliationRequest:
+    incident_id: str
+    expected: dict[str, Any]
+
+
+@dataclass
 class IncidentWorkflowResult:
     status: str
     history: list[str]
@@ -129,6 +136,17 @@ async def verify_incident_recovery(request: VerificationRequest) -> dict[str, An
         target_p99_ms=request.target_p99_ms,
         observed_p99_samples=request.observed_p99_samples,
         minimum_samples=request.minimum_samples,
+    )
+
+
+@activity.defn(name="reconcile_postgres_projection")
+async def reconcile_projection(
+    request: ProjectionReconciliationRequest,
+) -> dict[str, Any]:
+    """读取 PostgreSQL projection；数据库凭据只存在 Worker 环境。"""
+    return await reconcile_postgres_projection(
+        incident_id=request.incident_id,
+        expected=request.expected,
     )
 
 
@@ -287,6 +305,7 @@ TEMPORAL_ACTIVITIES = [
     collect_incident_evidence,
     execute_approved_action,
     verify_incident_recovery,
+    reconcile_projection,
 ]
 
 

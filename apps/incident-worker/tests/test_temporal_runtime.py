@@ -26,6 +26,7 @@ def test_temporal_definitions_are_explicit():
         "collect_incident_evidence",
         "execute_approved_action",
         "verify_incident_recovery",
+        "reconcile_postgres_projection",
     ]
     assert temporal_runtime.OBSERVATION_RETRY_POLICY.maximum_attempts == 3
 
