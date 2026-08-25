@@ -64,7 +64,7 @@ async def test_full_profile_refuses_synthetic_observation_and_action(monkeypatch
             "idempotency-key-1234",
             "approval-token",
         )
-    with pytest.raises(RuntimeError, match="SLO observation adapter"):
+    with pytest.raises(RuntimeError, match="Prometheus adapter"):
         await verify_slo_recovery("inventory-api", observed_p99_samples=[100.0])
 
 
@@ -90,3 +90,25 @@ async def test_full_profile_uses_configured_telemetry_source(monkeypatch):
     result = await collect_prometheus_evidence("up")
     assert result["source_mode"] == "observed"
     assert result["source_ref"] == "query_prometheus://configured"
+
+
+@pytest.mark.asyncio
+async def test_full_profile_slo_uses_prometheus_samples(monkeypatch):
+    monkeypatch.setenv("SENTINEL_PROFILE", "full")
+    monkeypatch.setenv("PROMETHEUS_BASE_URL", "http://prometheus")
+    monkeypatch.setenv("LOKI_BASE_URL", "http://loki")
+    monkeypatch.setenv("TEMPO_BASE_URL", "http://tempo")
+    from sentinel_x_incident_worker import activities
+    from sentinel_x_diagnostics.sources import TelemetryResponse
+
+    def fake_query(self, _tool, _params):
+        return TelemetryResponse(
+            payload={"status": "success", "data": {"result": [{"value": [1, "0.18"]}]}},
+            source_ref="query_prometheus://configured",
+        )
+
+    monkeypatch.setattr(activities.HttpTelemetrySource, "query", fake_query)
+    result = await verify_slo_recovery("inventory-api", target_p99_ms=200.0)
+    assert result["recovered"] is True
+    assert result["observed_p99_ms"] == 180.0
+    assert result["sample_count"] == 1

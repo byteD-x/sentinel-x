@@ -49,7 +49,14 @@ def _telemetry_source() -> HttpTelemetrySource:
     )
 
 
-def _observed_evidence(source: HttpTelemetrySource, tool: DiagnosticToolType, params: dict, query: str) -> dict:
+def _observed_evidence(
+    source: HttpTelemetrySource,
+    tool: DiagnosticToolType,
+    params: dict,
+    query: str,
+    *,
+    include_payload: bool = False,
+) -> dict:
     try:
         response = source.query(tool, params)
     except TelemetrySourceError:
@@ -60,7 +67,7 @@ def _observed_evidence(source: HttpTelemetrySource, tool: DiagnosticToolType, pa
     payload_hash = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
-    return {
+    evidence = {
         "evidence_id": str(uuid4()),
         "source": tool.value,
         "source_ref": response.source_ref,
@@ -71,6 +78,9 @@ def _observed_evidence(source: HttpTelemetrySource, tool: DiagnosticToolType, pa
         "collected_at": datetime.now().isoformat(),
         "truncated": False,
     }
+    if include_payload:
+        evidence["_payload"] = payload
+    return evidence
 
 
 async def reconcile_postgres_projection(
@@ -370,9 +380,25 @@ async def verify_slo_recovery(
 
     通过比较 baseline 和 observed 窗口的指标来判断恢复。
     """
-    _require_real_full_adapter("SLO observation")
-    await asyncio.sleep(0.3)
-    samples = observed_p99_samples or []
+    if os.getenv("SENTINEL_PROFILE", "light") == "full":
+        source = _telemetry_source()
+        query = (
+            f'histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{{service="{service_name}"}}[5m])) by (le))'
+        )
+        observed = await asyncio.to_thread(
+            _observed_evidence,
+            source,
+            DiagnosticToolType.QUERY_PROMETHEUS,
+            {"query": query, "time_range_minutes": observed_window_minutes},
+            query,
+            include_payload=True,
+        )
+        payload = observed.get("_payload")
+        samples = _extract_prometheus_samples(payload)
+        observed.pop("_payload", None)
+    else:
+        await asyncio.sleep(0.3)
+        samples = observed_p99_samples or []
     failure_reason: str | None = None
     if not samples:
         failure_reason = "观测窗口无数据"
@@ -400,3 +426,32 @@ async def verify_slo_recovery(
         "failure_reason": failure_reason,
         "verified_at": datetime.now().isoformat(),
     }
+
+
+def _extract_prometheus_samples(payload: dict | None) -> list[float]:
+    """解析 Prometheus vector/matrix 的数值，拒绝非数值输入。"""
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return []
+    result = data.get("result")
+    if not isinstance(result, list):
+        return []
+    samples: list[float] = []
+    for item in result:
+        values = item.get("value") if isinstance(item, dict) else None
+        if values is None and isinstance(item, dict):
+            values = item.get("values")
+        if isinstance(values, list) and values and isinstance(values[0], list):
+            values = [entry[1] for entry in values if isinstance(entry, list) and len(entry) > 1]
+        if isinstance(values, list) and len(values) >= 2 and not isinstance(values[0], list):
+            values = [values[1]]
+        if isinstance(values, list):
+            for value in values:
+                try:
+                    # http_request_duration_seconds 以秒计，契约阈值统一使用毫秒。
+                    samples.append(float(value) * 1000.0)
+                except (TypeError, ValueError):
+                    continue
+    return samples

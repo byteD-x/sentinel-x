@@ -107,7 +107,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 | P0 | `[部分完成]` Action Gateway 已有受控 fake K8s 状态变化和失败注入，但默认不连接真实目标，SLO 验证仅接受受控样本 | 用户无法证明动作真的改变业务状态 | 先将 fake K8s 接入隔离 full profile，再接 kind/k3d；验证必须读取真实 observed window |
 | P0 | `[部分完成]` Gateway 已从独立 ApprovalStore 读取不可变记录，并校验 namespace/kind/name/UID/generation、expiry、hash；SQLite backend 已支持跨连接原子消费，full profile 已增加带时间窗的 control-api 服务签名 | PostgreSQL 专用 DB role、正式 TokenReview/mTLS、跨服务事务和真实目标状态仍未完成 | 接入集群服务身份、真实目标 UID/generation 读取和跨服务事务 |
 | P1 | 事故回放目前主要是内存/SQLite 快照，导出包和持久 SSE 仍未完成 | 刷新、重启、复盘和跨人协作可信度不足 | PostgreSQL timeline/outbox + SSE gap/reconnect + 脱敏事故包 hash |
-| P1 | `[部分完成]` LocalExerciseWorkflow 已将审批决定与 action/recovery 推进分离，SLO 验证要求观测样本；真实审批投影仍未完全接入 | fixture 或受控样本不能证明业务真实恢复 | 终态只能由 Gateway 执行结果协调和真实 SLO VerificationResult 推进，动作成功与恢复成功分离 |
+| P1 | `[部分完成]` LocalExerciseWorkflow 已将审批决定与 action/recovery 推进分离，full SLO Activity 已读取 Prometheus p99 并要求 observed window；真实审批投影仍未完全接入 | fixture 或受控样本不能证明业务真实恢复 | 终态只能由 Gateway 执行结果协调和真实 SLO VerificationResult 推进，动作成功与恢复成功分离 |
 | P1 | 缺少用户级过滤、搜索、证据新鲜度和“为什么升级人工”的统一解释 | 故障多时认知负担高 | 先补状态/严重度/服务/时间过滤、稳定拒绝码和统一升级原因，不扩展无关图表 |
 | P2 | 无产品行为埋点 | 无法知道用户是否完成查看、审批、回放和演练 | 只采集合成环境事件：scenario_started、incident_opened、evidence_viewed、approval_decided、replay_completed |
 
