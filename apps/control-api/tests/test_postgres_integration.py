@@ -135,3 +135,57 @@ def test_control_api_full_lifespan_uses_postgres_store(monkeypatch):
         control_app.local_workflow.store = original_workflow_store
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
         admin.close()
+
+
+@pytest.mark.integration
+def test_postgres_store_rebuilds_incident_and_timeline_after_restart():
+    admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
+    if not admin_url:
+        pytest.skip("未设置 SENTINEL_POSTGRES_ADMIN_URL")
+    psycopg = pytest.importorskip("psycopg")
+    database = f"sentinel_x_rebuild_{uuid4().hex[:10]}"
+    admin = psycopg.connect(admin_url, autocommit=True)
+    try:
+        admin.execute(f'CREATE DATABASE "{database}"')
+        database_url = admin_url.rsplit("/", 1)[0] + f"/{database}"
+        apply_migrations(
+            database_url,
+            migrations_dir=Path(__file__).resolve().parents[3] / "migrations",
+            connect=lambda *args, **kwargs: psycopg.connect(database_url, **kwargs),
+        )
+        repository = PostgresIncidentRepository(lambda: psycopg.connect(database_url))
+        record = repository.create_incident(
+            fingerprint="restart-fingerprint",
+            severity="critical",
+            service="payment-api",
+            workflow_id="incident/restart-1",
+        )
+        repository.append_event(
+            incident_id=record.id,
+            event_type="evidence.collected",
+            actor_type="INVESTIGATOR",
+            payload={"source": "postgres"},
+            workflow_event_id="restart-event-2",
+        )
+        restored = control_app.PostgresStore(
+            PostgresIncidentRepository(lambda: psycopg.connect(database_url))
+        )
+        incident = restored.get_incident(str(record.id))
+        assert incident is not None
+        assert incident.status.value == "DETECTED"
+        assert incident.severity.value == "critical"
+        assert [event.sequence for event in incident.timeline] == [1, 2]
+        assert incident.timeline[1].event_type == "evidence.collected"
+        assert incident.timeline[1].payload == {"source": "postgres"}
+        restored.set_status(incident, control_app.IncidentStatus.TRIAGING, "restart test")
+        restarted = control_app.PostgresStore(
+            PostgresIncidentRepository(lambda: psycopg.connect(database_url))
+        )
+        recovered = restarted.get_incident(str(record.id))
+        assert recovered is not None
+        assert recovered.status == control_app.IncidentStatus.TRIAGING
+        assert [event.sequence for event in recovered.timeline] == [1, 2, 3]
+        assert recovered.timeline[-1].event_type == "incident.status_changed"
+    finally:
+        admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        admin.close()
