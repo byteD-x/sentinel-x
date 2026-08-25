@@ -18,6 +18,8 @@ from sentinel_x_action_gateway.executor import (
     FakeKubernetesExecutor,
     TargetIdentityMismatch,
 )
+from sentinel_x_contracts import RiskLevel
+from sentinel_x_domain.services import compute_plan_hash
 
 
 def test_gateway_app_can_select_fake_k8s_executor(monkeypatch):
@@ -29,8 +31,6 @@ def test_gateway_app_can_select_fake_k8s_executor(monkeypatch):
     assert executor.execution_mode == "fake-k8s"
     deployment = executor.api.get_current("demo-shop", "Deployment", "inventory-api")
     assert deployment.replicas == deployment.ready_replicas == 3
-from sentinel_x_contracts import RiskLevel
-from sentinel_x_domain.services import compute_plan_hash
 
 
 def _identity(generation: int = 1) -> TargetIdentity:
