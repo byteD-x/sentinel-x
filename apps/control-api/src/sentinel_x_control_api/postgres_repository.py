@@ -96,20 +96,6 @@ class PostgresIncidentRepository:
         incident_id = incident_id or uuid4()
         event_id = event_id or f"incident-created:{incident_id}"
         with self._transaction() as (_connection, cursor):
-            cursor.execute(
-                """
-                SELECT id, workflow_id, alert_fingerprint, status, severity, service,
-                       opened_at, projection_version
-                FROM incidents
-                WHERE alert_fingerprint = %s
-                  AND status NOT IN ('RESOLVED', 'ESCALATED', 'FAILED')
-                FOR UPDATE
-                """,
-                (fingerprint,),
-            )
-            existing = cursor.fetchone()
-            if existing:
-                return self._incident(existing)
             now = datetime.now(timezone.utc)
             cursor.execute(
                 """
@@ -117,6 +103,9 @@ class PostgresIncidentRepository:
                     id, workflow_id, alert_fingerprint, status, severity, service,
                     projection_version, workflow_event_id, opened_at, updated_at
                 ) VALUES (%s, %s, %s, 'DETECTED', %s, %s, 1, %s, %s, %s)
+                ON CONFLICT (alert_fingerprint)
+                    WHERE status NOT IN ('RESOLVED', 'ESCALATED', 'FAILED')
+                DO NOTHING
                 RETURNING id, workflow_id, alert_fingerprint, status, severity, service,
                           opened_at, projection_version
                 """,
@@ -124,7 +113,22 @@ class PostgresIncidentRepository:
             )
             row = cursor.fetchone()
             if row is None:
-                raise PostgresRepositoryError("创建事故未返回记录")
+                cursor.execute(
+                    """
+                    SELECT id, workflow_id, alert_fingerprint, status, severity, service,
+                           opened_at, projection_version
+                    FROM incidents
+                    WHERE alert_fingerprint = %s
+                      AND status NOT IN ('RESOLVED', 'ESCALATED', 'FAILED')
+                    FOR UPDATE
+                    """,
+                    (fingerprint,),
+                )
+                row = cursor.fetchone()
+            if row is None:
+                raise PostgresRepositoryError("active fingerprint 冲突后未找到事故")
+            if row[0] != incident_id:
+                return self._incident(row)
             self._append_event_cursor(
                 cursor,
                 incident_id=incident_id,

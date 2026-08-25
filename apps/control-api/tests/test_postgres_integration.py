@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -92,6 +93,56 @@ def test_real_repository_and_outbox_dispatcher():
         }
         assert event.sequence == 2
         assert dispatcher.dispatch_once() == 0
+    finally:
+        admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        admin.close()
+
+
+@pytest.mark.integration
+def test_postgres_active_fingerprint_claim_is_concurrent_safe():
+    admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
+    if not admin_url:
+        pytest.skip("未设置 SENTINEL_POSTGRES_ADMIN_URL")
+    psycopg = pytest.importorskip("psycopg")
+    database = f"sentinel_x_concurrent_{uuid4().hex[:10]}"
+    admin = psycopg.connect(admin_url, autocommit=True)
+    try:
+        admin.execute(f'CREATE DATABASE "{database}"')
+        database_url = admin_url.rsplit("/", 1)[0] + f"/{database}"
+        apply_migrations(
+            database_url,
+            migrations_dir=Path(__file__).resolve().parents[3] / "migrations",
+            connect=lambda *args, **kwargs: psycopg.connect(database_url, **kwargs),
+        )
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                """
+                CREATE FUNCTION test_delay_incident_insert() RETURNS trigger
+                LANGUAGE plpgsql AS $$
+                BEGIN
+                    PERFORM pg_sleep(0.2);
+                    RETURN NEW;
+                END;
+                $$;
+                CREATE TRIGGER test_delay_incident_insert
+                BEFORE INSERT ON incidents FOR EACH ROW
+                EXECUTE FUNCTION test_delay_incident_insert();
+                """
+            )
+
+        def create() -> object:
+            return PostgresIncidentRepository(
+                lambda: psycopg.connect(database_url)
+            ).create_incident(
+                fingerprint="concurrent-fingerprint",
+                severity="warning",
+                service="inventory-api",
+                workflow_id=f"incident/concurrent-{uuid4()}",
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            records = list(executor.map(lambda _index: create(), range(2)))
+        assert records[0].id == records[1].id
     finally:
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
         admin.close()

@@ -160,7 +160,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - `[已完成]` 先实现 `inventory-latched-5xx@1` 的 Temporal durable thin slice，不扩展场景。
 - `[已完成]` Temporal 已注册真实 Workflow、Activity、Signal/审批等待和 retry；full Worker 不再使用空实现降级。
 - `[已完成（本机集成）]` PostgreSQL 已完成 Incident、Timeline、Approval、ActionExecution、VerificationResult、outbox 和幂等记录 migration，并通过本机 PostgreSQL up/down/reapply 与持久化测试；远端 CI、真实 crash/restart 对账仍未完成。
-- `[部分完成]` Alert Ingress nonce 去重、ApprovalDecision 一次决定和 ActionExecution 幂等键已分别接入数据库唯一约束/事务；fingerprint/Incident 全链路与 ActionExecution 跨服务事务仍需收敛，不要让 API 继续复制一套独立状态转换表。
+- `[部分完成]` Alert Ingress nonce 去重、active fingerprint 并发复用、ApprovalDecision 一次决定和 ActionExecution 幂等键已分别接入数据库唯一约束/事务；ActionExecution 跨服务事务仍需收敛，不要让 API 继续复制一套独立状态转换表。
 - 用 outbox/唯一约束保证 command、审批决定、动作登记和投影可重试；加入 Workflow/DB 对账。
 - API 先收敛 `/api/v1`，同时保留兼容层的明确弃用策略。
 

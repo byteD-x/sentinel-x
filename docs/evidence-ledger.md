@@ -60,7 +60,7 @@
 | CLM-02 | 跨指标/日志/Trace/K8s 调查 | D | “定义了四类受限诊断工具与 Evidence 引用协议” | full E2E、工具审计、Top-1 report |
 | CLM-03 | 根因 Top-1 | D | “建立了 Top-1 与 B0/B1/C1 评测协议” | holdout dataset、样本数、模型/版本、原始报告 |
 | CLM-04 | 安全审批与受控动作 | I/T(partial) | “light Alert Ingress 校验时间戳、nonce、HMAC 并拒绝同 nonce 重放；Control API 创建审批时重算 MVP policy、目标和 canonical plan hash；Action Gateway 默认 fail-closed，校验 HMAC 审批凭证、独立 PostgreSQL/SQLite 审批记录、目标身份、Runbook/目标/参数/hash/expiry；full control-api 服务签名和 fake-k8s 选择边界已覆盖测试；默认动作仍为隔离 fixture/fake-k8s” | TokenReview/mTLS、跨服务事务/网络分区、真实目标 UID/generation 读取和真实 Kubernetes 执行测试 |
-| CLM-05 | 零重复副作用 | I/T(partial) | “进程内锁覆盖同一幂等键的并发提交测试；不代表跨进程、重启或超时后的零副作用” | submit timeout/Worker restart/数据库唯一约束/并发报告 effect=0 |
+| CLM-05 | 零重复副作用 | I/T(partial) | “PostgreSQL active fingerprint 使用部分唯一索引和 `ON CONFLICT DO NOTHING`，并发告警集成测试返回同一 Incident；Action 幂等仍不代表跨进程、重启或超时后的零副作用” | submit timeout/Worker restart/数据库唯一约束/并发报告 effect=0 |
 | CLM-06 | 固定攻击集拦截 | D | “定义了提示注入与越权攻击集” | 样本数、拒绝码、合法接受率、安全报告 |
 | CLM-07 | 自动/受控恢复 | D | “设计了自动恢复、restart、scale 三种可区分路径” | 因果对照、SLO observed window、recovery_actor |
 | CLM-08 | 可审计事故回放 | I/T(partial) | “light API 时间线支持 SSE sequence/Last-Event-ID，前端保留序号、退避重连和 REST 补读；新增 session 门控的脱敏 JSON 导出与内容 hash，但持久化重放/异步导出仍未完成” | refresh/reconnect/export E2E、事故包 hash |
