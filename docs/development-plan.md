@@ -96,7 +96,7 @@ make doctor       检查本机依赖和资源
 make demo-up      启动完整演练环境
 make demo-down    清理演练环境
 make test         运行快速质量门禁
-make test-e2e     运行隔离 E2E
+make test-e2e     运行完整本地回归（不含真实集群）
 make eval         运行固定评测并产出报告
 ```
 

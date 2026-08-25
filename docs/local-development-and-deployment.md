@@ -118,7 +118,7 @@ sentinel-chaos     Scenario Runner / Toxiproxy / fault fixtures
 | `make demo-reset` | 清理场景残留并回到基线 | dirty gate 通过、版本/副本/规则一致 |
 | `make demo-purge` | 删除项目专属集群和本地生成数据 | 精确目标确认；不触及其他 Docker/K8s 资源 |
 | `make test` | 快速 lint/type/unit/contract | 汇总报告 |
-| `make test-e2e` | 隔离完整闭环 | 事故包与测试结果 |
+| `make test-e2e` | 完整本地回归（不含真实集群） | 测试结果；真实 Kubernetes/观测闭环仍需 full profile |
 | `make eval` | 固定数据集评测 | JSON/Markdown 报告与 hash |
 
 删除/清理任务必须先解析并显示项目专属绝对目标，拒绝空变量、用户主目录、磁盘根、未知集群和无 Sentinel 标签资源。
