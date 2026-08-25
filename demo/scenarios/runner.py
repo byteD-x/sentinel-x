@@ -96,18 +96,22 @@ class ScenarioRunner:
         if cycle < 1:
             raise ValueError("cycle 必须从 1 开始")
         started = datetime.now(timezone.utc)
+        # inject 可能在写入部分状态后失败；只要调用过 inject，就必须进入
+        # cleanup，避免异常路径把演练环境留在 DIRTY 状态。
+        injection_attempted = False
         injected = False
         observed: dict[str, object] = {}
         error: str | None = None
         cleaned = False
         try:
+            injection_attempted = True
             self.backend.inject(scenario)
             injected = True
             observed = self.backend.observe(scenario)
         except Exception as exc:  # noqa: BLE001 - runner 要记录失败并继续 cleanup
             error = str(exc)
         finally:
-            if injected:
+            if injection_attempted:
                 try:
                     self.backend.cleanup(scenario)
                     cleaned = True
@@ -140,4 +144,3 @@ class ScenarioRunner:
                 if not result.environment_clean:
                     raise ScenarioRunnerError(f"第 {cycle} 轮 {scenario.id} 后环境 DIRTY")
         return results
-
