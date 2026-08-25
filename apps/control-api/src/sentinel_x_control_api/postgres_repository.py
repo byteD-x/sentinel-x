@@ -278,6 +278,7 @@ class PostgresIncidentRepository:
                     canonical = plan[3] if isinstance(plan[3], dict) else json.loads(plan[3])
                     result.update(
                         plan_id=str(canonical.get("client_plan_id", existing[2])),
+                        db_plan_id=str(existing[2]),
                         runbook_ref=f"{plan[0]}@1",
                         target=str(plan[1]),
                         parameters=dict(plan[2] or {}),
@@ -337,6 +338,7 @@ class PostgresIncidentRepository:
             result = self._approval_dict(row)
             result.update(
                 plan_id=client_plan_id,
+                db_plan_id=str(plan_id),
                 runbook_ref=runbook_ref,
                 target=target,
                 parameters=dict(parameters),
