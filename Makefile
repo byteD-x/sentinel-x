@@ -22,8 +22,8 @@ test: ## 运行快速质量门禁
 	python -m pytest -v --tb=short --asyncio-mode=auto
 	cd apps/terminal-console && npm test
 
-test-e2e: ## 运行 E2E 测试
-	python -m pytest tests/ -v --tb=short --asyncio-mode=auto
+test-e2e: ## 运行完整本地回归（不含真实集群）
+	python -m pytest -q --tb=short --asyncio-mode=auto
 
 lint: ## 代码检查
 	python -m ruff check packages/ apps/ demo/ --select E4,E7,E9
