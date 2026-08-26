@@ -69,6 +69,10 @@ from sentinel_x_control_api.postgres_dispatcher import PostgresOutboxDispatcher
 from sentinel_x_control_api.postgres_idempotency import PostgresIdempotencyStore
 from sentinel_x_control_api.postgres_replay import PostgresReplayStore
 from sentinel_x_control_api.postgres_repository import PostgresIncidentRepository
+from sentinel_x_control_api.temporal_signals import (
+    TemporalApprovalSignalPublisher,
+    build_temporal_outbox_sink,
+)
 
 
 EVAL_ARCHIVE_DIR = Path(os.getenv("SENTINEL_EVAL_ARCHIVE_DIR", "evals/results"))
@@ -1155,6 +1159,16 @@ LOCAL_SESSION_SIGNING_KEY = os.getenv("SENTINEL_LOCAL_SESSION_SIGNING_KEY")
 API_VERSION = "v1"
 
 
+async def _connect_temporal_client():
+    """仅在 full profile 建立 Temporal Client，连接失败由启动阶段拒绝。"""
+    from temporalio.client import Client
+
+    return await Client.connect(
+        os.getenv("TEMPORAL_ADDRESS", "127.0.0.1:7233"),
+        namespace=os.getenv("TEMPORAL_NAMESPACE", "sentinel-local"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # FastAPI 应用
 # ---------------------------------------------------------------------------
@@ -1185,8 +1199,21 @@ async def lifespan(app: FastAPI):
                 lambda: psycopg.connect(database_url)
             )
             replay_store = PostgresReplayStore(lambda: psycopg.connect(database_url))
+            temporal_client = await _connect_temporal_client()
+            temporal_publisher = TemporalApprovalSignalPublisher(temporal_client)
+            event_loop = asyncio.get_running_loop()
+            signal_timeout = max(
+                0.1, float(os.getenv("SENTINEL_TEMPORAL_SIGNAL_TIMEOUT_SECONDS", "10"))
+            )
+
             dispatcher = PostgresOutboxDispatcher(
-                lambda: psycopg.connect(database_url), store.publish_outbox_event
+                lambda: psycopg.connect(database_url),
+                build_temporal_outbox_sink(
+                    temporal_publisher,
+                    store.publish_outbox_event,
+                    event_loop,
+                    timeout_seconds=signal_timeout,
+                ),
             )
 
             async def dispatch_outbox() -> None:

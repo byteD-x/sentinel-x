@@ -28,6 +28,20 @@ from sentinel_x_control_api.postgres_replay import PostgresReplayStore
 from sentinel_x_domain.services import compute_plan_hash
 
 
+class _FakeTemporalHandle:
+    async def signal(self, _name, _payload):
+        return None
+
+
+class _FakeTemporalClient:
+    def get_workflow_handle(self, _workflow_id):
+        return _FakeTemporalHandle()
+
+
+async def _connect_fake_temporal_client():
+    return _FakeTemporalClient()
+
+
 @pytest.mark.integration
 def test_real_postgres_migration_round_trip(tmp_path: Path):
     admin_url = os.getenv("SENTINEL_POSTGRES_ADMIN_URL")
@@ -232,6 +246,9 @@ def test_control_api_full_lifespan_uses_postgres_store(monkeypatch):
         monkeypatch.setenv("LOCAL_SESSION_SIGNING_KEY", "integration-session")
         monkeypatch.setenv("ACTION_GATEWAY_URL", "http://gateway")
         monkeypatch.setenv("ALERT_INGRESS_HMAC_KEY", "integration-alert")
+        monkeypatch.setattr(
+            control_app, "_connect_temporal_client", _connect_fake_temporal_client
+        )
         monkeypatch.setattr(
             control_app.local_workflow,
             "resume_all",
@@ -524,6 +541,9 @@ def test_control_api_full_approval_is_persisted(monkeypatch):
         monkeypatch.setenv("LOCAL_SESSION_SIGNING_KEY", "integration-session")
         monkeypatch.setenv("ACTION_GATEWAY_URL", "http://gateway")
         monkeypatch.setenv("ALERT_INGRESS_HMAC_KEY", "integration-alert")
+        monkeypatch.setattr(
+            control_app, "_connect_temporal_client", _connect_fake_temporal_client
+        )
         monkeypatch.setattr(
             control_app.local_workflow,
             "resume",

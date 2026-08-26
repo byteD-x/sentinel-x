@@ -173,7 +173,7 @@ filters：`status[]`、`severity[]`、`service[]`、`awaiting_approval`、`exerc
 }
 ```
 
-MVP 命令：`CONTINUE_INVESTIGATION`、`ESCALATE_TO_HUMAN`、`CANCEL_PENDING_PLAN`。Control API 事务保存 command/outbox，dispatcher 使用 `command_id` Signal Workflow；重复 signal 在 Workflow 内去重。非法角色/状态返回 409/403。
+MVP 命令：`CONTINUE_INVESTIGATION`、`ESCALATE_TO_HUMAN`、`CANCEL_PENDING_PLAN`。Control API 事务保存 command/outbox，dispatcher 使用 `command_id` Signal Workflow；重复 signal 在 Workflow 内去重。full profile 的 `approval.decided` 同样以 PostgreSQL outbox 投递 `approval_decision` Signal，payload 固定包含 approval ID、plan hash、决定、决定人、理由和过期时间；Signal 成功后才标记 outbox 已发布，失败保留重试。非法角色/状态返回 409/403。
 
 ## 9. Evidence、Timeline 与报告
 

@@ -84,6 +84,7 @@ API 调用 `/api/actions` 时发送 `X-Sentinel-Service-Name: control-api`、当
 | `TEMPORAL_ADDRESS` | `127.0.0.1:7233` | 否/视 TLS | host:port |
 | `TEMPORAL_NAMESPACE` | `sentinel-local` | 否 | 非空固定命名 |
 | `TEMPORAL_TASK_QUEUE` | `sentinel-incidents` | 否 | Worker/API 一致 |
+| `SENTINEL_TEMPORAL_SIGNAL_TIMEOUT_SECONDS` | `10` | 否 | Control API 等待单次 outbox Signal 的上限；正数，超时保留 outbox 重试 |
 | `TEMPORAL_TLS_CA/CERT/KEY` | 本地空 | 是 | 启用 TLS 时成组提供；不进 `.env.example` 内容值 |
 
 Control API/Worker 使用领域 DB 角色；Action Gateway 使用更小的 approval/action 专用角色，连接凭据必须分开。
