@@ -51,23 +51,37 @@ async def _run(args: argparse.Namespace) -> Path:
             commit_sha=_commit_sha(),
             policy_ref="mvp-policy-v1",
             prompt_ref="none",
+            slo_policy_ref="slo-policy-v1",
+            report_kind="light-fixture",
         )
         report = await EvalRunner(config, executor).run_scenarios(standard_scenario_ids())
         reports.append(Path(save_eval_report(report, str(output), config)))
 
+    report_files = [path.with_suffix(".json") for path in reports]
     manifest = {
         "schema_version": "1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "report_kind": "light-fixture",
+        "source_mode": "fixture",
+        "publishable": False,
         "profile": "light-fixture",
         "dataset": args.dataset,
         "scenario_count": len(standard_scenario_ids()),
         "runs_per_scenario": args.runs,
-        "reports": [path.with_suffix(".json").name for path in reports],
+        "reports": [
+            {"name": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            for path in report_files
+        ],
         "commit_sha": _commit_sha(),
         "limitations": [
             "B0/B1/C1 均为本地 fixture；未连接真实 Kubernetes、Prometheus、Loki 或 Tempo。",
             "该证据包用于验证评测管线，不支持生产效果或根因准确率声明。",
         ],
+        "gate": {
+            "publishable": False,
+            "code": "FIXTURE_ONLY",
+            "reason": "light-fixture 仅用于验证评测管线，未连接真实场景执行器。",
+        },
     }
     manifest_path = output / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

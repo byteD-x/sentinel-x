@@ -51,6 +51,10 @@ class EvalConfig:
     commit_sha: str | None = None
     policy_ref: str | None = None
     prompt_ref: str | None = None
+    slo_policy_ref: str | None = "slo-policy-v1"
+    report_kind: str = "light-fixture"
+    source_mode: str = "fixture"
+    dirty: bool = False
 
     def __post_init__(self) -> None:
         if self.dataset not in {"dev", "calibration", "holdout"}:
@@ -61,6 +65,14 @@ class EvalConfig:
             raise ValueError("holdout 至少需要每场景 10 次运行")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds 必须大于 0")
+        if self.report_kind not in {"light-fixture", "formal-benchmark"}:
+            raise ValueError("report_kind 必须是 light-fixture 或 formal-benchmark")
+        if self.source_mode not in {"fixture", "observed", "replay"}:
+            raise ValueError("source_mode 必须是 fixture、observed 或 replay")
+        if self.dirty:
+            raise ValueError("dirty 环境禁止运行评测")
+        if self.profile == "full" and self.source_mode == "fixture":
+            raise ValueError("full profile 禁止使用 fixture 评测源")
 
 
 @dataclass(frozen=True)
@@ -258,6 +270,22 @@ def _build_public_archive(report: EvalReport, config: EvalConfig) -> EvaluationA
         )
         for run in report.runs
     ]
+    recovery_counts = {"attempted": 0, "succeeded": 0, "escalated": 0, "unknown": 0}
+    for run in report.runs:
+        disposition = str(run.raw_report.get("recovery_disposition", "unknown"))
+        recovery_counts["attempted"] += 1
+        if disposition in {"auto_recovery", "recovered", "succeeded"}:
+            recovery_counts["succeeded"] += 1
+        elif disposition in {"human_escalation", "escalated"}:
+            recovery_counts["escalated"] += 1
+        else:
+            recovery_counts["unknown"] += 1
+    total_safety_violations = sum(
+        int(metric.value)
+        for run in report.runs
+        for metric in run.metrics
+        if metric.name == "safety_violations"
+    )
     aggregate = EvaluationAggregate(
         attempted_runs=len(runs) + len(failures),
         completed_runs=len(runs),
@@ -267,6 +295,17 @@ def _build_public_archive(report: EvalReport, config: EvalConfig) -> EvaluationA
     return EvaluationArchive(
         report_id=report.report_id,
         created_at=datetime.now(timezone.utc),
+        report_kind=config.report_kind,
+        source_mode=config.source_mode,
+        publishable=False,
+        limitations=(
+            [
+                "fixture 评测源不代表真实执行、观测或恢复结果。",
+                "该报告不可用于对外效果或准确率声明。",
+            ]
+            if config.source_mode == "fixture"
+            else ["当前实现未满足正式发布证据门禁。"]
+        ),
         metadata=EvaluationMetadata(
             commit_sha=config.commit_sha,
             profile=config.profile,
@@ -276,6 +315,9 @@ def _build_public_archive(report: EvalReport, config: EvalConfig) -> EvaluationA
             model_ref=config.model_name,
             policy_ref=config.policy_ref,
             prompt_ref=config.prompt_ref,
+            slo_policy_ref=config.slo_policy_ref,
+            report_kind=config.report_kind,
+            dataset_split=config.dataset,
             random_seed=config.random_seed,
             runs_per_scenario=config.runs_per_scenario,
             timeout_seconds=config.timeout_seconds,
@@ -283,8 +325,24 @@ def _build_public_archive(report: EvalReport, config: EvalConfig) -> EvaluationA
         comparability=EvaluationComparability(
             comparable=False,
             baseline_ref=None,
-            reasons=["尚未建立同口径 baseline。"],
+            reasons=[
+                "当前报告来自 light-fixture，不能作为正式 benchmark。",
+                "尚未建立同口径 baseline。",
+            ],
         ),
+        recovery_summary=recovery_counts,
+        slo_summary={
+            "available": False,
+            "reason": "评测观察未提供独立 SLO observed window。",
+        },
+        security_summary={
+            "runs_with_violations": sum(
+                1
+                for run in report.runs
+                if any(metric.name == "safety_violations" and metric.value > 0 for metric in run.metrics)
+            ),
+            "total_violations": total_safety_violations,
+        },
         aggregate=aggregate,
         runs=runs,
         failures=failures,
