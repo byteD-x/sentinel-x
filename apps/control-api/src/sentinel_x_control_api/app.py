@@ -2103,9 +2103,9 @@ async def stream_incident(
 
     async def event_generator():
         last_seq = initial_sequence
-        # 先发送当前状态
-        yield f"data: {json.dumps({'type': 'status', 'status': incident.status.value})}\n\n"
-        # 然后轮询新事件（MVP 简化实现，正式版用 outbox + dispatcher）
+        # 先声明重连等待时间，再发送当前状态；后续以 Last-Event-ID 补发事件。
+        yield "retry: 1000\n\n"
+        yield f"event: status\ndata: {json.dumps({'type': 'status', 'status': incident.status.value})}\n\n"
         for _ in range(300):  # 最多 5 分钟
             events = store.get_timeline(incident_id, last_seq)
             for event in events:
@@ -2118,6 +2118,8 @@ async def stream_incident(
                     'timestamp': event.timestamp.isoformat(),
                 }})}\n\n"
                 last_seq = max(last_seq, event.sequence)
+            # 防止空闲连接被中间代理提前关闭。
+            yield ": heartbeat\n\n"
             await asyncio.sleep(1)
 
     return StreamingResponse(

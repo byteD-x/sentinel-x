@@ -153,6 +153,35 @@ class TestVersionedApi:
         assert response.status_code == 404
         assert "不存在" in response.json()["detail"]
 
+    async def test_stream_emits_reconnect_hint_and_replays_after_last_event(self, client):
+        created = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "stream-test",
+                "fingerprint": "stream-fingerprint",
+                "alert_name": "StreamTest",
+                "severity": "warning",
+                "description": "stream test",
+                "started_at": "2026-08-26T00:00:00Z",
+            }
+        })
+        incident_id = created.json()["id"]
+        control_module.store.add_timeline_event(
+            incident_id, "evidence.collected", "test", {"source": "test"}
+        )
+
+        response = await control_module.stream_incident(incident_id, last_event_id="1")
+        iterator = response.body_iterator
+        first = await anext(iterator)
+        second = await anext(iterator)
+        third = await anext(iterator)
+        fourth = await anext(iterator)
+        await iterator.aclose()
+
+        assert "retry:" in first
+        assert '"type": "status"' in second
+        assert '"sequence": 2' in third
+        assert fourth == ": heartbeat\n\n"
+
     async def test_v1_export_fails_closed_without_session_key(self, client, monkeypatch):
         monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", None)
         response = await client.get("/api/v1/incidents/missing/export")
