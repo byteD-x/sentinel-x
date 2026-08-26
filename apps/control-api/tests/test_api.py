@@ -729,6 +729,15 @@ class TestIncidents:
         data = response.json()
         assert len(data["items"]) >= 3
 
+    async def test_list_incidents_filters_by_severity_and_search(self, client):
+        await client.post('/api/demo/seed')
+        response = await client.get('/api/incidents?severity=critical&search=inventory')
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['items']
+        assert all(item['severity'] == 'critical' for item in payload['items'])
+        assert all('inventory' in (item['alert_name'] + item['description']).lower() for item in payload['items'])
+
     async def test_get_nonexistent_incident(self, client):
         response = await client.get("/api/incidents/nonexistent")
         assert response.status_code == 404

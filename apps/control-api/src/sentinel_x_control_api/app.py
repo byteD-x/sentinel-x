@@ -538,6 +538,8 @@ class InMemoryStore:
     def list_incidents(
         self,
         status_filter: Optional[IncidentStatus] = None,
+        severity_filter: Optional[IncidentSeverity] = None,
+        search: Optional[str] = None,
         cursor: Optional[str] = None,
         limit: int = 20,
     ) -> tuple[list[StoredIncident], Optional[str]]:
@@ -546,6 +548,14 @@ class InMemoryStore:
         incidents.sort(key=lambda i: i.created_at, reverse=True)
         if status_filter:
             incidents = [i for i in incidents if i.status == status_filter]
+        if severity_filter:
+            incidents = [i for i in incidents if i.severity == severity_filter]
+        if search:
+            needle = search.casefold()
+            incidents = [
+                i for i in incidents
+                if needle in i.alert_name.casefold() or needle in i.description.casefold()
+            ]
         # 简单分页
         start = 0
         if cursor:
@@ -1769,11 +1779,19 @@ async def receive_alertmanager_webhook(data: AlertmanagerWebhook, request: Reque
 @app.get("/api/incidents", response_model=IncidentListResponse)
 async def list_incidents(
     status: Optional[IncidentStatus] = None,
+    severity: Optional[IncidentSeverity] = None,
+    search: Optional[str] = Query(default=None, min_length=1, max_length=120),
     cursor: Optional[str] = None,
     limit: int = Query(default=20, ge=1, le=100),
 ):
     """事故列表。"""
-    items, next_cursor = store.list_incidents(status_filter=status, cursor=cursor, limit=limit)
+    items, next_cursor = store.list_incidents(
+        status_filter=status,
+        severity_filter=severity,
+        search=search,
+        cursor=cursor,
+        limit=limit,
+    )
     return IncidentListResponse(
         items=[
             IncidentResponse(

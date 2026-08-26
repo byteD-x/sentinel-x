@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Activity, AlertTriangle, ArrowRight, CheckCircle2, ClipboardCheck, LoaderCircle, PlayCircle, RefreshCw, Search, ShieldCheck, Timer } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
@@ -68,6 +68,9 @@ function formatTime(value: string) {
 export function DashboardPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const statusFilter = searchParams.get('status') || 'all'
+  const severityFilter = searchParams.get('severity') || 'all'
+  const searchFilter = searchParams.get('search') || ''
+  const [searchInput, setSearchInput] = useState(searchFilter)
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -81,6 +84,8 @@ export function DashboardPage() {
     try {
       const params = new URLSearchParams({ limit: '20' })
       if (statusFilter !== 'all') params.set('status', statusFilter)
+      if (severityFilter !== 'all') params.set('severity', severityFilter)
+      if (searchFilter) params.set('search', searchFilter)
       if (cursor) params.set('cursor', cursor)
       const response = await apiFetch(`/api/incidents?${params.toString()}`)
       const data = await response.json() as { items?: Incident[]; next_cursor?: string | null }
@@ -92,7 +97,7 @@ export function DashboardPage() {
     } finally {
       setLoading(false)
     }
-  }, [cursor, statusFilter])
+  }, [cursor, searchFilter, severityFilter, statusFilter])
 
   useEffect(() => { fetchIncidents() }, [fetchIncidents])
 
@@ -110,7 +115,29 @@ export function DashboardPage() {
     setCursor(null)
     setCursorStack([])
     setNextCursor(null)
-    setSearchParams(value === 'all' ? {} : { status: value })
+    const next = new URLSearchParams(searchParams)
+    if (value === 'all') next.delete('status')
+    else next.set('status', value)
+    next.delete('cursor')
+    setSearchParams(next)
+  }
+
+  const handleSeverityChange = (value: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (value === 'all') next.delete('severity')
+    else next.set('severity', value)
+    next.delete('cursor')
+    setSearchParams(next)
+  }
+
+  const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const next = new URLSearchParams(searchParams)
+    const value = searchInput.trim()
+    if (value) next.set('search', value)
+    else next.delete('search')
+    next.delete('cursor')
+    setSearchParams(next)
   }
 
   const handleSeed = async () => {
@@ -233,6 +260,16 @@ export function DashboardPage() {
           <div><span className={styles.sectionKicker}>故障列表</span><h2>全部故障</h2></div>
           <div className={styles.filterBar} aria-label="故障筛选">
             {STATUS_FILTERS.map(filter => <button key={filter.value} className={filter.value === statusFilter ? styles.filterActive : styles.filterButton} type="button" aria-pressed={filter.value === statusFilter} onClick={() => handleFilterChange(filter.value)}>{filter.label}</button>)}
+            <select className={styles.filterSelect} aria-label="按严重度筛选" value={severityFilter} onChange={event => handleSeverityChange(event.target.value)}>
+              <option value="all">全部级别</option>
+              <option value="critical">严重</option>
+              <option value="warning">警告</option>
+              <option value="info">提示</option>
+            </select>
+            <form className={styles.searchForm} role="search" onSubmit={handleSearchSubmit}>
+              <Search size={14} aria-hidden="true" />
+              <input aria-label="搜索故障" value={searchInput} onChange={event => setSearchInput(event.target.value)} placeholder="搜索故障或服务" />
+            </form>
           </div>
         </div>
 

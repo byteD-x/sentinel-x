@@ -71,6 +71,13 @@
 .filterButton, .filterActive { min-height: 30px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text-muted); background: transparent; font-size: 11px; }
 .filterButton:hover { color: var(--color-text); border-color: var(--color-border-strong); }
 .filterActive { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-soft); }
+.filterSelect,
+.searchForm { min-height: 34px; border: 1px solid var(--color-border); border-radius: 4px; color: var(--color-text); background: var(--color-surface); font-size: 11px; }
+.filterSelect { padding: 0 8px; }
+.searchForm { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; }
+.searchForm:focus-within { border-color: var(--color-accent); }
+.searchForm input { width: 140px; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; }
+.searchForm input::placeholder { color: var(--color-text-dim); }
 .errorBanner { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 11px 13px; border: 1px solid #efb9bd; border-radius: 6px; color: var(--color-danger); background: var(--color-danger-soft); font-size: 12px; }
 .empty { min-height: 180px; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--color-text-muted); font-size: 12px; }
 .emptyState { min-height: 190px; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--color-text-dim); text-align: center; }
