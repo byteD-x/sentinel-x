@@ -1911,7 +1911,8 @@ async def decide_approval(
     result = store.decide_approval(approval_id, decision, decided_by=decided_by, incident_id=incident_id)
     if not result:
         raise HTTPException(status_code=404, detail=f"审批 {approval_id} 不存在或已决定")
-    local_workflow.resume(incident_id)
+    if not isinstance(store, PostgresStore):
+        local_workflow.resume(incident_id)
     return result
 
 
@@ -2016,7 +2017,8 @@ async def decide_formal_approval_request(
     )
     if result is None:
         raise HTTPException(status_code=409, detail="审批已被其他请求决定或已过期")
-    local_workflow.resume(approval["incident_id"])
+    if not isinstance(store, PostgresStore):
+        local_workflow.resume(approval["incident_id"])
     return result
 
 

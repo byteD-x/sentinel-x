@@ -523,6 +523,11 @@ def test_control_api_full_approval_is_persisted(monkeypatch):
         monkeypatch.setenv("LOCAL_SESSION_SIGNING_KEY", "integration-session")
         monkeypatch.setenv("ACTION_GATEWAY_URL", "http://gateway")
         monkeypatch.setenv("ALERT_INGRESS_HMAC_KEY", "integration-alert")
+        monkeypatch.setattr(
+            control_app.local_workflow,
+            "resume",
+            lambda *_args: pytest.fail("full profile 不应触发 local fixture 编排"),
+        )
         with TestClient(control_app.app) as client:
             incident = control_app.store.create_incident(
                 IncidentCreate(
