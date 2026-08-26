@@ -40,6 +40,7 @@
 - Incident Worker full 安全边界：Prometheus/Loki/Tempo/Kubernetes/Action Gateway/SLO fixture Activity 在 `SENTINEL_PROFILE=full` 且未配置真实 adapter 时统一拒绝，避免 Temporal full 路径返回合成成功；light fixture 测试保持可用。
 - Diagnostic Gateway full 安全边界：无 `HttpTelemetrySource` 时，`SENTINEL_PROFILE=full` 拒绝场景模拟查询；light profile 仍可使用确定性 fixture。
 - 隔离 full profile 切片：Action Gateway 通过 `SENTINEL_EXECUTION_MODE=fake-k8s` 显式选择受控 fake Kubernetes 执行器，并为 demo-shop Deployment 注册固定身份；full profile 配置为 fixture 时现在启动即 fail-closed，light 默认仍为 fixture 且 kill switch 默认开启。该切片支持 API 级 before/after 状态证据，不等同于真实集群写入。
+- Action reconcile 切片：`running`/`unknown` ActionExecution 可按原 approval 重新读取目标，fake K8s 根据 UID、generation、批准副本数及 ready/health 收敛为 succeeded/failed/unknown；每次协调持久化 `reconciliation_count`，不会重新消费审批。fake 执行器、Gateway 与 PostgreSQL 重启读取测试通过；真实 Kubernetes 状态、网络分区和跨服务事务仍未验证。
 - 固定评测 CLI：`python scripts/run_evaluation.py` 生成 B0/B1/C1 三套本地报告、manifest 和 checksums；holdout 强制每场景至少 10 次。报告仍标记 `light-fixture`，不可用于生产效果或准确率声明。
 - 场景 Runner：`python scripts/run_scenario_matrix.py --cycles 3` 已对固定六场景执行 18 次隔离注入/观测/cleanup，并在每轮检查环境 CLEAN；backend 为 in-memory fixture。
 - 固定攻击集：`python scripts/run_security_attack_set.py` 记录 10 个样本、危险拦截率、合法 R1 接受率和 dataset hash；这是 policy/参数静态门禁，不替代 Kubernetes RBAC/网络攻击测试。

@@ -173,7 +173,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - Gateway 重新读取批准记录并校验 namespace/kind/name/UID/generation；Control API 的审批创建端也必须服务器端重算 policy 与 canonical plan hash。
 - 保持 kill switch 默认开启；在所有负向测试通过前不开放 full R1。
 
-验证：`[部分完成]` 合法 restart/scale、fake K8s 状态变化、UID/generation 漂移、timeout/partial-ready/unknown、过期、撤销、参数改写、幂等和 R2/R3 拒绝已有测试；fake-k8s 已接入 full profile 选择边界，仍未完成 timeout/reconcile、跨 namespace/Secrets/exec 攻击集、真实 effect count 和真实集群证据。
+验证：`[部分完成]` 合法 restart/scale、fake K8s 状态变化、UID/generation 漂移、timeout/partial-ready/unknown、过期、撤销、参数改写、幂等和 R2/R3 拒绝已有测试；fake-k8s 已接入 full profile 选择边界，`unknown` 可按原审批重读受限目标并持久化 reconcile 次数，仍未完成跨 namespace/Secrets/exec 攻击集、真实 effect count 和真实集群证据。
 
 ### P1：补齐可用的 full Demo MVP
 

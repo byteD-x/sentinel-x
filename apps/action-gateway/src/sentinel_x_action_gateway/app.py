@@ -146,6 +146,7 @@ class ActionStatusResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     execution_mode: str = "fixture"
+    reconciliation_count: int = 0
 
 
 class HealthResponse(BaseModel):
@@ -211,6 +212,7 @@ class StoredExecution:
     execution_mode: str = "fixture"
     target_identity: TargetIdentity | None = None
     target_resource_version: str = "unknown"
+    reconciliation_count: int = 0
 
 
 class ExecutionStore:
@@ -246,6 +248,9 @@ class ExecutionStore:
         execution = self._executions.get(execution_id)
         if execution:
             for key, value in kwargs.items():
+                if key == "reconciliation_increment":
+                    execution.reconciliation_count += value
+                    continue
                 setattr(execution, key, value)
         return execution
 
@@ -279,6 +284,7 @@ class PostgresExecutionStore:
                 namespace=str(row[9]), kind=str(row[10]), name=str(row[11]),
                 uid=str(row[12]), generation=int(row[14]),
             ),
+            reconciliation_count=int(row[21]),
         )
 
     _SELECT = """
@@ -286,7 +292,7 @@ class PostgresExecutionStore:
                idempotency_key_hash, idempotency_key, target_name, target_namespace,
                target_kind, target_name, target_uid, before_state_ref,
                target_observed_generation, after_state_ref, after_state_hash,
-               error_code, attempt_count, started_at, finished_at
+               error_code, attempt_count, started_at, finished_at, reconciliation_count
         FROM action_executions
     """
 
@@ -352,14 +358,17 @@ class PostgresExecutionStore:
                         """
                         UPDATE action_executions
                         SET status = %s, after_state_ref = %s::jsonb,
-                            error_code = %s, finished_at = %s, version = version + 1
+                            error_code = %s, finished_at = %s,
+                            reconciliation_count = reconciliation_count + %s,
+                            version = version + 1
                         WHERE id = %s
                         """,
                         (
                             status,
                             json.dumps({"text": kwargs.get("after_state", execution.after_state)}),
                             kwargs.get("error", execution.error),
-                            kwargs.get("completed_at", execution.completed_at), execution_id,
+                            kwargs.get("completed_at", execution.completed_at),
+                            kwargs.get("reconciliation_increment", 0), execution_id,
                         ),
                     )
         finally:
@@ -657,6 +666,50 @@ class ActionGate:
 
         return self.store.get(execution_id)
 
+    async def reconcile(self, execution_id: str) -> StoredExecution | None:
+        """仅使用持久审批与受限执行器协调未决副作用。"""
+        execution = self.store.get(execution_id)
+        if execution is None:
+            return None
+        if execution.status not in {"running", "unknown", "reconciling"}:
+            return execution
+        approval = self.approval_store.get(execution.approval_id)
+        if approval is None or execution.target_identity is None:
+            return self.store.update(
+                execution_id,
+                status="failed",
+                error="reconcile 缺少权威审批或目标身份",
+                completed_at=datetime.now(),
+                reconciliation_increment=1,
+            )
+        if (
+            approval.incident_id != execution.incident_id
+            or approval.runbook_ref != execution.runbook_ref
+            or approval.target_identity != execution.target_identity
+        ):
+            return self.store.update(
+                execution_id,
+                status="failed",
+                error="reconcile 发现审批与执行记录不一致",
+                completed_at=datetime.now(),
+                reconciliation_increment=1,
+            )
+        result = self.executor.reconcile(
+            execution.runbook_ref,
+            execution.target_identity,
+            dict(approval.parameters),
+        )
+        terminal = result.status in {"succeeded", "failed", "rejected", "cancelled"}
+        return self.store.update(
+            execution_id,
+            status=result.status,
+            after_state=result.after_state,
+            output=result.output,
+            error=result.error,
+            completed_at=datetime.now() if terminal else None,
+            reconciliation_increment=1,
+        )
+
 
 # ---------------------------------------------------------------------------
 # FastAPI 应用
@@ -828,6 +881,7 @@ async def get_action_status(execution_id: str):
         started_at=execution.started_at,
         completed_at=execution.completed_at,
         execution_mode=execution.execution_mode,
+        reconciliation_count=execution.reconciliation_count,
     )
 
 
@@ -853,7 +907,34 @@ async def get_action_by_idempotency(
         idempotency_key=execution.idempotency_key, before_state=execution.before_state,
         after_state=execution.after_state, output=execution.output, error=execution.error,
         started_at=execution.started_at, completed_at=execution.completed_at,
+        execution_mode=execution.execution_mode, reconciliation_count=execution.reconciliation_count,
+    )
+
+
+@app.post("/api/actions/{execution_id}/reconcile", response_model=ActionStatusResponse)
+async def reconcile_action(
+    execution_id: str,
+    service_name: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Name"),
+    service_timestamp: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Timestamp"),
+    service_signature: Optional[str] = Header(default=None, alias="X-Sentinel-Service-Signature"),
+):
+    """在提交超时或 unknown 后按原审批重新读取目标状态。"""
+    identity_error = _service_identity_error(
+        service_name=service_name, timestamp=service_timestamp, signature=service_signature
+    )
+    if identity_error:
+        raise HTTPException(status_code=401, detail=identity_error)
+    execution = await gate.reconcile(execution_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail=f"执行 {execution_id} 不存在")
+    return ActionStatusResponse(
+        execution_id=execution.execution_id, status=execution.status,
+        runbook_ref=execution.runbook_ref, target=execution.target,
+        idempotency_key=execution.idempotency_key, before_state=execution.before_state,
+        after_state=execution.after_state, output=execution.output, error=execution.error,
+        started_at=execution.started_at, completed_at=execution.completed_at,
         execution_mode=execution.execution_mode,
+        reconciliation_count=execution.reconciliation_count,
     )
 
 

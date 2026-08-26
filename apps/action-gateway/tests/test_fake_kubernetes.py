@@ -174,3 +174,43 @@ async def test_action_gate_records_fake_kubernetes_before_after_state():
     assert execution.execution_mode == "fake-k8s"
     assert "generation=1" in execution.before_state
     assert "generation=2" in execution.after_state
+
+
+@pytest.mark.asyncio
+async def test_action_gate_reconciles_unknown_fake_kubernetes_action():
+    api = FakeKubernetesApi()
+    identity = _identity()
+    api.register_deployment(identity)
+    api.set_failure_mode("unknown")
+    approval_store = ApprovalStore()
+    gate = ActionGate(
+        store=ExecutionStore(), approval_store=approval_store, kill_switch=False,
+        approval_token_secret="test-secret", executor=FakeKubernetesExecutor(api),
+    )
+    parameters = {"reason": "reconcile test"}
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    approval = ApprovalRecord(
+        approval_id="approval-reconcile", incident_id="incident-reconcile",
+        runbook_ref="restart_deployment@1", target=identity.name, parameters=parameters,
+        plan_hash=compute_plan_hash("restart_deployment@1", identity.name, parameters, "incident-reconcile"),
+        risk_level=RiskLevel.R1, audience="sentinel-action-gateway", expires_at=expires_at,
+        target_identity=identity,
+    )
+    approval_store.register(approval)
+    request = ActionSubmitRequest(
+        runbook_ref=approval.runbook_ref, target=approval.target, parameters=parameters,
+        plan_hash=approval.plan_hash, approval_id=approval.approval_id,
+        approval_token=gate._expected_approval_token(approval), approval_expires_at=expires_at,
+        incident_id=approval.incident_id, audience=approval.audience,
+        target_identity=identity, idempotency_key="fake-k8s-reconcile-key-001",
+    )
+    allowed, reason, runbook, record = gate.validate(request)
+    assert allowed, reason
+    execution = await gate.execute(runbook, request, record)
+    assert execution.status == "unknown"
+
+    reconciled = await gate.reconcile(execution.execution_id)
+
+    assert reconciled.status == "succeeded"
+    assert reconciled.reconciliation_count == 1
+    assert "generation=2" in reconciled.after_state

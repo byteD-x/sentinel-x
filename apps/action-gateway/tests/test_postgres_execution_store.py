@@ -79,7 +79,12 @@ def test_postgres_execution_store_persists_idempotency_and_status():
         reopened_store = PostgresExecutionStore(lambda: psycopg.connect(database_url))
         assert reopened_store.create(duplicate) is False
         assert reopened_store.check_idempotency(execution.idempotency_key).execution_id == execution.execution_id
-        store.update(execution.execution_id, status="succeeded", after_state="after")
+        store.update(
+            execution.execution_id,
+            status="succeeded",
+            after_state="after",
+            reconciliation_increment=1,
+        )
         restarted = PostgresExecutionStore(lambda: psycopg.connect(database_url))
         restored = restarted.get(execution.execution_id)
         assert restored is not None
@@ -87,6 +92,7 @@ def test_postgres_execution_store_persists_idempotency_and_status():
         assert restored.runbook_ref == "restart_deployment@1"
         assert restored.idempotency_key == "idempotency-execution-1"
         assert restored.after_state == "after"
+        assert restored.reconciliation_count == 1
     finally:
         admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
         admin.close()

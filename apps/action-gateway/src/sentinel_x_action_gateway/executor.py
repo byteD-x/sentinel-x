@@ -47,6 +47,14 @@ class ActionExecutor(Protocol):
     ) -> ActionExecutionResult:
         """执行一个已通过 Gateway 门控的动作。"""
 
+    def reconcile(
+        self,
+        runbook_ref: str,
+        target_identity: TargetIdentity,
+        parameters: dict,
+    ) -> ActionExecutionResult:
+        """重新读取受限目标，协调此前结果未知的动作。"""
+
 
 class FixtureActionExecutor:
     """light profile 的确定性执行器，不产生外部副作用。"""
@@ -78,6 +86,17 @@ class FixtureActionExecutor:
                 f"uid={target_identity.uid}, generation={target_identity.generation}"
             ),
             output=f"成功执行 {runbook_ref} on {target_identity.name}",
+        )
+
+    def reconcile(
+        self,
+        runbook_ref: str,
+        target_identity: TargetIdentity,
+        parameters: dict,
+    ) -> ActionExecutionResult:
+        return ActionExecutionResult(
+            status="unknown",
+            error="fixture 执行器不能提供权威 reconcile 结论",
         )
 
 
@@ -251,3 +270,28 @@ class FakeKubernetesExecutor:
         parameters: dict,
     ) -> ActionExecutionResult:
         return self.api.apply(runbook_ref, target_identity, parameters)
+
+    def reconcile(
+        self,
+        runbook_ref: str,
+        target_identity: TargetIdentity,
+        parameters: dict,
+    ) -> ActionExecutionResult:
+        current = self.api.get_current(
+            target_identity.namespace, target_identity.kind, target_identity.name
+        )
+        if current.identity.uid != target_identity.uid:
+            return ActionExecutionResult(status="failed", error="目标 UID 已漂移")
+        if current.identity.generation <= target_identity.generation:
+            return ActionExecutionResult(
+                status="unknown", error="尚未观察到预期的目标 generation 变化"
+            )
+        if runbook_ref == "scale_deployment@1" and current.replicas != parameters.get("replicas"):
+            return ActionExecutionResult(status="failed", error="副本数未达到批准的目标")
+        if not current.healthy or current.ready_replicas != current.replicas:
+            return ActionExecutionResult(status="failed", error="Deployment 未达到健康 ready 状态")
+        return ActionExecutionResult(
+            status="succeeded",
+            after_state=self.api._format(current),
+            output=f"fake Kubernetes reconcile 确认 {runbook_ref} 已生效",
+        )

@@ -291,7 +291,7 @@ Gateway 不接受 plan body 作为授权事实。它从数据库读取 plan/appr
 - 403：策略、risk 或 kill switch 拒绝。
 
 请求超时后 Worker 必须用同一幂等键查询，不生成新 key。当前兼容路径为
-`GET /api/actions/by-idempotency/{idempotency_key}`，full profile 同样要求服务身份签名。
+`GET /api/actions/by-idempotency/{idempotency_key}`，full profile 同样要求服务身份签名。对 `running` 或 `unknown` 记录，可调用 `POST /api/actions/{execution_id}/reconcile`；Gateway 仅从权威审批记录重取参数/目标并读取受限执行器状态，每次协调递增 `reconciliation_count`，不重新消费审批或生成新幂等键。
 
 ### `GET /internal/v1/actions/{id}`
 
