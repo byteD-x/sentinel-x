@@ -249,7 +249,7 @@ ground truth 端点仅 Evaluator 的内部身份可读，不由浏览器或 Inve
 
 当前 `GET /api/scenarios` 和 `POST /api/scenarios/{scenario_id}/run` 每次均从服务端固定的 YAML 目录读取严格场景契约，不再维护内存硬编码场景或从场景 ID 推导目标。列表只返回 ID、描述、故障分类、首个受限目标的 service/namespace 及允许的 Runbook；ground truth、预期证据、清理元数据和物理路径不会进入浏览器响应。
 
-light fixture 根据 YAML 的明确许可分支：`no_op` 从 `DIAGNOSING` 直接进入 `VERIFYING`，空许可列表升级人工，R1 创建审批，R2/R3 经 policy 拒绝并升级。它不注入真实故障、不执行 Kubernetes 动作，也不替代正式 `/api/v1`、持久化审批或 Scenario Runner。
+light fixture 根据 YAML 的明确许可分支：`no_op` 从 `DIAGNOSING` 直接进入 `VERIFYING`，空许可列表升级人工，R1 创建审批，R2/R3 经 policy 拒绝并升级。它不注入真实故障、不执行 Kubernetes 动作，也不替代正式 `/api/v1`、持久化审批或 Scenario Runner。`SENTINEL_PROFILE=full` 明确拒绝 `/api/v1/scenarios/{id}/run` 和兼容路径，必须由 Temporal 与真实 Scenario Runner 编排，不能将 fixture 结果写入 full 事故时间线。
 
 ### 当前 light 评测归档只读实现
 

@@ -26,7 +26,7 @@ Sentinel-X 当前不是“完成的 AI 运维产品”，而是一个 **D1-light
 - `[已完成]` 新增 `.github/workflows/quality.yml`，覆盖 Python 测试/轻量 Ruff、Web Console、Terminal Console。
 - `[已完成]` Alert Ingress 增加时间戳 + nonce + HMAC，有界 replay cache 和重复 nonce 拒绝；full profile 已将 nonce claim 升级为 PostgreSQL 唯一约束与原子事务，真实 Alertmanager/观测栈联调仍未完成。
 - `[已完成]` Control API 创建审批时重新执行 MVP policy、风险等级和 canonical plan hash 校验。
-- `[已完成]` 场景启动统一进入 `LocalExerciseWorkflow`；审批决定只记录用户意图，执行/验证由编排器推进；API 启动时恢复未完成 checkpoint。
+- `[已完成]` light 场景启动统一进入 `LocalExerciseWorkflow`；审批决定只记录用户意图，执行/验证由编排器推进；light API 启动时恢复未完成 checkpoint。full profile 明确拒绝该 fixture 编排入口，等待 Temporal 与真实 Scenario Runner 接管。
 - `[已完成]` 对本地快照中的 orphan checkpoint 做安全清理，避免旧测试状态阻塞启动。
 - `[已完成]` `SentinelIncidentWorkflow` 已注册 Temporal Workflow/Activity，覆盖审批 Signal、Activity retry、history replay 和独立本地 Temporal Server 上的 Worker 重启恢复。
 - `[已完成]` SLO 恢复验证改为基于显式观测样本，兼容 Workflow 与 Temporal Activity 均拒绝空窗口、样本不足和超阈值。

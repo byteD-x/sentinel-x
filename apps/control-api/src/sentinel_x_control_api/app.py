@@ -1188,7 +1188,8 @@ async def lifespan(app: FastAPI):
             dispatcher_task = asyncio.create_task(dispatch_outbox())
         except Exception as exc:  # noqa: BLE001 - full 启动必须 fail closed
             raise RuntimeError("SENTINEL_PROFILE=full PostgreSQL 初始化失败") from exc
-    local_workflow.resume_all()
+    if not isinstance(store, PostgresStore):
+        local_workflow.resume_all()
     try:
         yield
     finally:
@@ -2040,6 +2041,11 @@ async def run_scenario(
 ):
     """启动演练场景。"""
     _require_role(getattr(request.state, "session_role", None) or role, "scenario_operator")
+    if isinstance(store, PostgresStore):
+        raise HTTPException(
+            status_code=503,
+            detail="full profile 必须由 Temporal 与真实 Scenario Runner 编排；禁止本地 fixture 场景执行",
+        )
     scenario = _load_scenario_definitions().get(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"场景 {scenario_id} 不存在")

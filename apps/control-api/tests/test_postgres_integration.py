@@ -232,8 +232,19 @@ def test_control_api_full_lifespan_uses_postgres_store(monkeypatch):
         monkeypatch.setenv("LOCAL_SESSION_SIGNING_KEY", "integration-session")
         monkeypatch.setenv("ACTION_GATEWAY_URL", "http://gateway")
         monkeypatch.setenv("ALERT_INGRESS_HMAC_KEY", "integration-alert")
-        with TestClient(control_app.app):
+        monkeypatch.setattr(
+            control_app.local_workflow,
+            "resume_all",
+            lambda: pytest.fail("full profile 不应续跑 local fixture checkpoint"),
+        )
+        with TestClient(control_app.app) as client:
             assert isinstance(control_app.store, PostgresStore)
+            rejected = client.post(
+                "/api/scenarios/inventory-latched-5xx@1/run",
+                headers={"X-Sentinel-Role": "scenario_operator"},
+            )
+            assert rejected.status_code == 503
+            assert "Temporal" in rejected.json()["detail"]
             incident = control_app.store.create_incident(
                 IncidentCreate(
                     alert_source=AlertSource(
