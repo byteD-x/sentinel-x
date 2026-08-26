@@ -230,7 +230,12 @@ export function IncidentDetailPage() {
   const activeApproval = overview.active_approval
   const canApprove = overview.capabilities.can_decide_approval
   const completedApprovals = approvals.filter(approval => approval.status !== 'pending')
-  const sourceLabel = overview.environment.source_mode === 'fixture' ? '演练数据' : '观测数据'
+  const isFixture = overview.environment.source_mode === 'fixture'
+  const sourceLabel = isFixture ? '演练数据' : '受控观测数据'
+  const scopeLabel = overview.environment.data_scope === 'exercise' ? '隔离演练范围' : overview.environment.data_scope
+  const sourceBoundary = isFixture
+    ? '以下证据、执行结果和恢复验证来自隔离演练 fixture，不代表真实 Kubernetes 写入或生产观测。'
+    : '以下证据来自受控观测来源；请结合更新时间和来源范围判断是否仍然新鲜。'
 
   return (
     <div className={styles.page}>
@@ -253,6 +258,21 @@ export function IncidentDetailPage() {
           <code>INC {overview.id.slice(0, 8)}</code>
         </div>
       </header>
+
+      <section className={styles.sourceBanner} data-mode={overview.environment.source_mode} aria-label="数据来源边界">
+        <div className={styles.sourceBannerIcon} aria-hidden="true">
+          {isFixture ? <AlertTriangle size={17} /> : <ShieldCheck size={17} />}
+        </div>
+        <div className={styles.sourceBannerCopy}>
+          <strong>{sourceLabel}</strong>
+          <p>{sourceBoundary}</p>
+        </div>
+        <dl className={styles.sourceFacts}>
+          <div><dt>数据范围</dt><dd>{scopeLabel}</dd></div>
+          <div><dt>事故更新时间</dt><dd>{formatDate(overview.updated_at)}</dd></div>
+          {overview.impact && <div><dt>影响观测时间</dt><dd>{formatDate(overview.impact.observed_at)}</dd></div>}
+        </dl>
+      </section>
 
       <section className={styles.signalGrid} aria-label="事故摘要">
         <article className={styles.signalPanel}>
@@ -385,7 +405,7 @@ export function IncidentDetailPage() {
       )}
 
       <details className={styles.technicalLedger}>
-        <summary><span><FileClock size={15} aria-hidden="true" /> 技术事件账本</span><span>{timeline.length} 条事件</span></summary>
+        <summary><span><FileClock size={15} aria-hidden="true" /> 技术事件账本 · {sourceLabel}</span><span>{timeline.length} 条事件</span></summary>
         {timeline.length > 0 ? (
           <ol className={styles.timeline}>
             {timeline.map(event => (

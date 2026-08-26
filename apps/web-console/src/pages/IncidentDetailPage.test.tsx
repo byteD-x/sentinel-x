@@ -116,6 +116,8 @@ describe('IncidentDetailPage', () => {
     expect(screen.getByText('先核对错误日志与连接池指标。')).toBeInTheDocument()
     expect(screen.getByText('服务端事故阶段')).toBeInTheDocument()
     expect(screen.getAllByText('演练数据').length).toBeGreaterThan(0)
+    expect(screen.getByRole('region', { name: '数据来源边界' })).toHaveTextContent('不代表真实 Kubernetes 写入或生产观测')
+    expect(screen.getByRole('region', { name: '数据来源边界' })).toHaveTextContent('隔离演练范围')
   })
 
   it('shows the server capability denial instead of deriving permissions from the local role', async () => {

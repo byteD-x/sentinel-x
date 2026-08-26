@@ -95,6 +95,32 @@
 
 .meta code { color: var(--color-text-dim); font-size: 10px; }
 
+.sourceBanner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(250px, .8fr);
+  align-items: start;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.sourceBanner[data-mode='observed'] {
+  border-left-color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.sourceBannerIcon { color: var(--color-warning); }
+.sourceBanner[data-mode='observed'] .sourceBannerIcon { color: var(--color-success); }
+.sourceBannerCopy { min-width: 0; }
+.sourceBannerCopy strong { color: var(--color-text); font-size: 12px; }
+.sourceBannerCopy p { margin-top: 4px; color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
+.sourceFacts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px 16px; margin: 0; }
+.sourceFacts div { display: grid; gap: 2px; min-width: 90px; }
+.sourceFacts dt { color: var(--color-text-dim); font-size: 9px; }
+.sourceFacts dd { margin: 0; color: var(--color-text); font-size: 10px; font-weight: 650; }
+
 .statusBadge {
   padding: 4px 8px;
   border-radius: 4px;
@@ -516,12 +542,16 @@
   .signalGrid,
   .workbench { grid-template-columns: 1fr; }
   .signalPanel + .signalPanel { border-top: 1px solid var(--color-border); border-left: 0; }
+  .sourceBanner { grid-template-columns: auto minmax(0, 1fr); }
+  .sourceFacts { grid-column: 2; justify-content: flex-start; }
 }
 
 @media (max-width: 640px) {
   .page { gap: 13px; }
   .headerTopline,
   .identityRow { align-items: flex-start; flex-direction: column; }
+  .sourceBanner { grid-template-columns: auto minmax(0, 1fr); }
+  .sourceFacts { grid-column: 1 / -1; }
   .identityRow h1 { font-size: 24px; }
   .signalPanel { min-height: 0; padding: 16px; }
   .decisionBand { grid-template-columns: 34px minmax(0, 1fr); padding: 15px; }

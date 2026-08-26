@@ -100,7 +100,7 @@ stdout 不是 TTY 时必须输出结构化 JSON；参数错误、网络错误和
 
 固定展示 Incident ID、环境、severity、服务、规范状态、持续时间、数据新鲜度和关联 run。状态变化只更新内容，不改变整页布局。
 
-当前 light Control API 已提供服务端驱动的 `IncidentOverview`：环境边界、当前影响摘要、Top-1 判断、下一步、活动审批、恢复验证、角色 capabilities 和按阶段折叠的 milestones。前端后续直接渲染该读模型，不再从状态字符串自行推导业务阶段；其中 fixture 数据必须持续显示来源标识。
+当前 light Control API 已提供服务端驱动的 `IncidentOverview`：环境边界、当前影响摘要、Top-1 判断、下一步、活动审批、恢复验证、角色 capabilities 和按阶段折叠的 milestones。前端后续直接渲染该读模型，不再从状态字符串自行推导业务阶段；其中 fixture 数据必须持续显示来源标识。事故详情页还应在证据链上方集中展示来源模式、数据范围、事故更新时间和影响观测时间；fixture 必须明确提示其不代表真实 Kubernetes 写入或生产观测，技术事件账本和恢复验证沿用同一来源标签。
 
 ### 6.2 影响与 SLO
 
