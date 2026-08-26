@@ -74,6 +74,7 @@ from sentinel_x_control_api.postgres_repository import PostgresIncidentRepositor
 EVAL_ARCHIVE_DIR = Path(os.getenv("SENTINEL_EVAL_ARCHIVE_DIR", "evals/results"))
 EVAL_ARCHIVE_MAX_BYTES = int(os.getenv("SENTINEL_EVAL_ARCHIVE_MAX_BYTES", "2097152"))
 INCIDENT_EXPORT_MAX_BYTES = int(os.getenv("SENTINEL_INCIDENT_EXPORT_MAX_BYTES", "1048576"))
+SSE_REPLAY_MAX_EVENTS = max(1, int(os.getenv("SENTINEL_SSE_REPLAY_MAX_EVENTS", "500")))
 SCENARIOS_DIR = Path(__file__).resolve().parents[4] / "demo" / "scenarios"
 LOGGER = logging.getLogger(__name__)
 
@@ -631,6 +632,12 @@ class InMemoryStore:
             return []
         return [e for e in incident.timeline if e.sequence > after_sequence]
 
+    def get_timeline_bounds(self, incident_id: str) -> tuple[int, int] | None:
+        incident = self._incidents.get(incident_id)
+        if not incident or not incident.timeline:
+            return None
+        return incident.timeline[0].sequence, incident.timeline[-1].sequence
+
     def list_outbox(self, *, unpublished_only: bool = False) -> list[dict]:
         """按事故序号返回可重试的投影事件。"""
         events = self._outbox
@@ -910,6 +917,12 @@ class PostgresStore(InMemoryStore):
         # 每次读取都以 PostgreSQL 为准，避免 SSE 轮询只看到进程内旧缓存。
         hydrated = self._hydrate(record)
         return [event for event in hydrated.timeline if event.sequence > after_sequence]
+
+    def get_timeline_bounds(self, incident_id: str) -> tuple[int, int] | None:
+        try:
+            return self.repository.get_timeline_bounds(UUID(incident_id))
+        except ValueError:
+            return None
 
     def create_workflow_checkpoint(
         self, incident_id: str, scenario_id: str, phase: str
@@ -2108,6 +2121,20 @@ async def stream_incident(
         raise HTTPException(status_code=400, detail="Last-Event-ID 必须是时间线序号") from exc
     if initial_sequence < 0:
         raise HTTPException(status_code=400, detail="Last-Event-ID 不能为负数")
+    bounds = store.get_timeline_bounds(incident_id)
+    if bounds:
+        first_sequence, latest_sequence = bounds
+        earliest_sequence = max(first_sequence, latest_sequence - SSE_REPLAY_MAX_EVENTS + 1)
+        if last_event_id is not None and initial_sequence < earliest_sequence - 1:
+            raise HTTPException(
+                status_code=410,
+                detail={
+                    "code": "SSE_CURSOR_EXPIRED",
+                    "earliest_sequence": earliest_sequence,
+                },
+            )
+        if last_event_id is None:
+            initial_sequence = earliest_sequence - 1
 
     async def event_generator():
         last_seq = initial_sequence

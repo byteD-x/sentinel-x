@@ -341,6 +341,7 @@ def test_postgres_store_rebuilds_incident_and_timeline_after_restart():
         assert len(events) == 1
         assert events[0].event_type == "hypothesis.generated"
         assert events[0].payload == {"source": "external-connection"}
+        assert repository.get_timeline_bounds(record.id) == (1, 4)
 
         repository.append_event(
             incident_id=record.id,

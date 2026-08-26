@@ -83,3 +83,15 @@ def test_create_incident_writes_incident_timeline_and_outbox_in_one_transaction(
 def test_repository_rejects_non_callable_connection_factory():
     with pytest.raises(TypeError, match="connect"):
         PostgresIncidentRepository(None)
+
+
+def test_get_timeline_bounds_queries_minimum_and_maximum_sequence():
+    connection = FakeConnection()
+    connection.cursor_instance.rows.append((4, 9))
+    repository = PostgresIncidentRepository(lambda: connection)
+
+    bounds = repository.get_timeline_bounds(UUID("00000000-0000-0000-0000-000000000001"))
+
+    assert bounds == (4, 9)
+    sql = "\n".join(call[0] for call in connection.cursor_instance.calls)
+    assert "SELECT MIN(sequence), MAX(sequence)" in sql

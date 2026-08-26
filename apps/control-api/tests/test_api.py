@@ -7,6 +7,7 @@ import time
 
 import pytest
 from demo.scenarios.loader import ScenarioLoader
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sentinel_x_contracts import IncidentSeverity, IncidentStatus, RiskLevel
 from sentinel_x_domain.services import compute_plan_hash
@@ -181,6 +182,32 @@ class TestVersionedApi:
         assert '"type": "status"' in second
         assert '"sequence": 2' in third
         assert fourth == ": heartbeat\n\n"
+
+    async def test_stream_rejects_expired_cursor_with_earliest_sequence(self, client, monkeypatch):
+        monkeypatch.setattr(control_module, "SSE_REPLAY_MAX_EVENTS", 1)
+        created = await client.post("/api/incidents", json={
+            "alert_source": {
+                "alertmanager_id": "expired-stream-test",
+                "fingerprint": "expired-stream-fingerprint",
+                "alert_name": "ExpiredStreamTest",
+                "severity": "warning",
+                "description": "stream test",
+                "started_at": "2026-08-26T00:00:00Z",
+            }
+        })
+        incident_id = created.json()["id"]
+        control_module.store.add_timeline_event(
+            incident_id, "evidence.collected", "test", {"source": "test"}
+        )
+
+        with pytest.raises(HTTPException) as error:
+            await control_module.stream_incident(incident_id, last_event_id="0")
+
+        assert error.value.status_code == 410
+        assert error.value.detail == {
+            "code": "SSE_CURSOR_EXPIRED",
+            "earliest_sequence": 2,
+        }
 
     async def test_v1_export_fails_closed_without_session_key(self, client, monkeypatch):
         monkeypatch.setattr(control_module, "LOCAL_SESSION_SIGNING_KEY", None)

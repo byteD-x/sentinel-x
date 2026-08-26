@@ -206,7 +206,7 @@ data: {"schema_version":"1.0","incident_id":"inc_example","sequence":184,"event_
 - 客户端按 `incident_id + sequence` 去重，发现 gap 立即暂停实时渲染并 REST 补齐。
 - payload 不包含原始秘密、审批凭证或完整大 Evidence。
 
-当前 light/prototype 同时注册兼容路径 `GET /api/incidents/{id}/stream` 与受 local session 门控的 `GET /api/v1/incidents/{id}/stream`；两者都会先发送 `retry: 1000` 和状态帧，再发送 `id: <sequence>` 与 `event: timeline_event`，接受数值 `Last-Event-ID` 从下一序号补发，并在空闲轮询中发送 SSE heartbeat。前端同时以 REST timeline 补读防止连接缺口。它仍没有保留窗口、410 过期语义或跨进程发布 broker，不能视为完整 SSE 契约实现。
+当前 light/prototype 同时注册兼容路径 `GET /api/incidents/{id}/stream` 与受 local session 门控的 `GET /api/v1/incidents/{id}/stream`；两者都会先发送 `retry: 1000` 和状态帧，再发送 `id: <sequence>` 与 `event: timeline_event`，接受数值 `Last-Event-ID` 从下一序号补发，并在空闲轮询中发送 SSE heartbeat。`SENTINEL_SSE_REPLAY_MAX_EVENTS`（默认 500，最小 1）限定服务端补发窗口；旧 cursor 返回 `410`，响应 detail 包含稳定码 `SSE_CURSOR_EXPIRED` 与 `earliest_sequence`。PostgreSQL profile 每轮从权威时间线读取，能观察到其他进程已提交事件；前端仍以 REST timeline 补读防止连接缺口。该实现仍没有低延迟跨进程发布 broker、慢客户端缓冲上限或物理审计保留清理，不能视为完整 SSE 契约实现。
 
 ## 11. Approval API
 

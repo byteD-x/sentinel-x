@@ -189,6 +189,21 @@ class PostgresIncidentRepository:
                 ))
             return records
 
+    def get_timeline_bounds(self, incident_id: UUID) -> tuple[int, int] | None:
+        with self._transaction() as (_connection, cursor):
+            cursor.execute(
+                """
+                SELECT MIN(sequence), MAX(sequence)
+                FROM timeline_events
+                WHERE incident_id = %s
+                """,
+                (incident_id,),
+            )
+            row = cursor.fetchone()
+            if row is None or row[0] is None or row[1] is None:
+                return None
+            return int(row[0]), int(row[1])
+
     @staticmethod
     def _checkpoint(row: tuple[Any, ...]) -> dict[str, Any]:
         return {
